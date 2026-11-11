@@ -198,3 +198,44 @@ def test_malformed_vertex_not_written(tmp_path):
     res = convert_file(str(bad), str(out), settings=False, config_dir=str(tmp_path / "none"))
     assert any("malformed vertices" in w for w in res.stats.warnings)
     assert b"evil" not in b"".join(zipfile.ZipFile(out).read(n) for n in zipfile.ZipFile(out).namelist())
+
+
+def _colour_change_project(tmp_path, extruders=None):
+    gc = ('<?xml version="1.0" encoding="utf-8"?><custom_gcodes_per_print_z bed_idx="0">'
+          '<code print_z="11.8" type="0" extruder="1" color="#FF8000" extra="" gcode="M600"/>'
+          '<code print_z="15" type="0" extruder="1" color="#FF0000" extra="" gcode="M600"/>'
+          '<mode value="SingleExtruder"/></custom_gcodes_per_print_z>')
+    parts = [Part("p", extruder=e) for e in (extruders or [None])]
+    return build_3mf(tmp_path / "in.3mf", [Obj("a", parts=parts)], custom_gcodes=gc,
+                     config={"color_change_gcode": "M600\\nG1 E0.3 F1500"})
+
+
+def test_colour_change_becomes_filament_change(tmp_path):
+    src = _colour_change_project(tmp_path)
+    out = tmp_path / "out.3mf"
+    convert_file(src, str(out), settings=False, config_dir=str(tmp_path / "none"))
+    xml = _open(out).read("Metadata/custom_gcode_per_layer.xml").decode()
+    # #FF0000 is extruder 1's own colour: back to slot 1; #FF8000 gets a new slot 2
+    assert 'top_z="11.8" type="2" extruder="2"' in xml
+    assert 'top_z="15" type="2" extruder="1"' in xml
+    assert 'value="MultiAsSingle"' in xml
+
+
+def test_colour_change_slots_in_settings(tmp_path):
+    src = _colour_change_project(tmp_path)
+    out = tmp_path / "out.3mf"
+    convert_file(src, str(out), printer="auto", slicer="bambu", config_dir=str(tmp_path / "none"))
+    # no install: the PrusaSlicer printer is kept, so its own colour change G-code runs
+    xml = _open(out).read("Metadata/custom_gcode_per_layer.xml").decode()
+    assert 'type="4"' in xml and "M600&#10;G1 E0.3 F1500" in xml
+    ps = json.loads(_open(out).read("Metadata/project_settings.config"))
+    assert len(ps["filament_colour"]) == 1
+
+
+def test_colour_change_in_multi_filament_print_pauses(tmp_path):
+    src = _colour_change_project(tmp_path, extruders=[1, 2])
+    out = tmp_path / "out.3mf"
+    res = convert_file(src, str(out), settings=False, config_dir=str(tmp_path / "none"))
+    xml = _open(out).read("Metadata/custom_gcode_per_layer.xml").decode()
+    assert xml.count('type="1"') == 2
+    assert any("became pauses" in w for w in res.stats.warnings)

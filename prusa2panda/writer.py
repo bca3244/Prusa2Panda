@@ -110,6 +110,11 @@ class WritePlan:
     # Prusa per-object / per-part / per-range settings -> Bambu keys (None: drop them).
     object_settings: Optional[Callable[[Dict[str, str], str], Dict[str, str]]] = None
     title: str = ""
+    # How each PrusaSlicer colour change (bed, index in that bed's list) is written, decided
+    # by convert.py: ("tool", slot) = change to that filament slot, ("custom", gcode) = run
+    # that G-code, ("pause", "") = pause. Bambu Studio / OrcaSlicer write no G-code for a
+    # plain colour change, so one left as is would do nothing.
+    colour_changes: Dict[tuple, tuple] = field(default_factory=dict)
 
 
 @dataclass
@@ -687,7 +692,25 @@ def _custom_gcodes(project: PrusaProject, plates: List[int], fmap: Dict[int, int
         if not bg or not bg.items:
             continue
         lines.append(f'<plate>\n<plate_info id="{p + 1}"/>\n')
-        for it in bg.items:
+        has_tool_change = False
+        for i, it in enumerate(bg.items):
+            how = plan.colour_changes.get((bed, i)) if it.type == 0 else None
+            if how is not None:
+                kind, arg = how
+                if kind == "tool":
+                    has_tool_change = True
+                    lines.append(f'<layer top_z="{it.print_z:g}" type="2" extruder="{arg}" '
+                                 f'color={quoteattr(it.color)} extra="" gcode="tool_change"/>\n')
+                elif kind == "custom":
+                    lines.append(f'<layer top_z="{it.print_z:g}" type="4" extruder="1" '
+                                 f'color={quoteattr(it.color)} extra={quoteattr(arg)} gcode={quoteattr(arg)}/>\n')
+                else:
+                    lines.append(f'<layer top_z="{it.print_z:g}" type="1" extruder="1" '
+                                 f'color={quoteattr(it.color)} extra="" gcode="M601"/>\n')
+                count += 1
+                continue
+            if it.type == 2:
+                has_tool_change = True
             ext = fmap.get(it.extruder) if fmap else it.extruder
             if ext is None:
                 if it.type in (0, 2):  # a colour / tool change of an extruder nothing prints with
@@ -703,7 +726,8 @@ def _custom_gcodes(project: PrusaProject, plates: List[int], fmap: Dict[int, int
                 f'extra={quoteattr(it.extra)} gcode={quoteattr(gcode)}/>\n'
             )
             count += 1
-        mode = "SingleExtruder" if n_slots <= 1 else "MultiAsSingle"
+        # Tool changes only drive the filament in MultiAsSingle mode (ToolOrdering).
+        mode = "MultiAsSingle" if (n_slots > 1 or has_tool_change) else "SingleExtruder"
         lines.append(f'<mode value="{mode}"/>\n</plate>\n')
     lines.append("</custom_gcodes_per_layer>\n")
     return "".join(lines), count
