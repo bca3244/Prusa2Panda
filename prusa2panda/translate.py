@@ -173,9 +173,10 @@ class Translator:
             "support_style": {"support_material_style"},
             "ironing_type": {"ironing", "ironing_type"},
             "wall_sequence": {"external_perimeters_first"},
+            "brim_type": {"brim_width"},
         }
         for k, srcs in trigger.items():
-            if touched & srcs and k in special and k in allowed:
+            if touched & srcs and k in special and k in allowed and k not in out:
                 v = special[k]
                 out[k] = v if isinstance(v, str) else ",".join(v)
         for pk, tk in K.OBJECT_SPECIAL.items():

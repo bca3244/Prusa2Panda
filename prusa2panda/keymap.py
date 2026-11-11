@@ -994,6 +994,15 @@ def special_print(pv: PrusaView, flavor: str, warnings: list, variants: int = 1)
 
     for k, v in support_values(pv, flavor).items():
         put(k, v)
+    # PrusaSlicer prints no brim when brim_width is 0, whatever brim_type says; Bambu / Orca
+    # read brim_type alone (and default to auto_brim), so say no_brim outright.
+    if pv.has("brim_width") or pv.has("brim_type"):
+        try:
+            width = float(pv.scalar("brim_width") or 0)
+        except ValueError:
+            width = 0.0
+        if width <= 0:
+            put("brim_type", "no_brim")
     for k, v in ironing_values(pv).items():
         put(k, v)
     if pv.has("external_perimeters_first"):
