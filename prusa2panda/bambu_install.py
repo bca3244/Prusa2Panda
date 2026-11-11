@@ -283,7 +283,7 @@ class BambuInstall:
                 path = os.path.join(sys_dir, fn)
                 try:
                     cache = orca_cache.read_vendor_cache(path)
-                except (OSError, orca_cache.CacheError):
+                except Exception:  # noqa: BLE001 - one unreadable vendor must not stop the rest
                     continue
                 for m in cache.models:
                     index.setdefault(("machine_model", m["name"]), Preset("machine_model", m["name"], True, m, path, vendor))

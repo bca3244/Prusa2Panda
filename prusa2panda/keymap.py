@@ -804,7 +804,12 @@ def serialize(schema, key: str, value, n: int = 1):
     if kind in ("points",):
         return list(value) if isinstance(value, list) else [value]
     if kind.endswith("s") and kind != "string" or kind == "pointsgroups":
-        vals = value if isinstance(value, list) else [value] * max(1, n)
+        # Only per-extruder-variant vectors repeat once per variant; any other vector
+        # (post_process, ...) is one value, not n copies of it.
+        per_variant = (key in getattr(schema, "PRINT_VARIANT_KEYS", ()) or
+                       key in getattr(schema, "FILAMENT_VARIANT_KEYS", ()) or
+                       key in getattr(schema, "PRINTER_VARIANT_KEYS", ()))
+        vals = value if isinstance(value, list) else [value] * (max(1, n) if per_variant else 1)
         if kind == "bools":
             vals = [to_bool(x) or x for x in vals]
         return [str(x) for x in vals]
@@ -836,6 +841,9 @@ def convert_print(cfg: Dict[str, str], flavor: str = "bambu", warnings: Optional
             continue
         out[tkey] = serialize(S, tkey, v, variants)
     out.update(special_print(pv, flavor, warnings, variants))
+    if "post_process" in out:  # every script, once each; none when empty
+        scripts = [x for x in (prusa_split("post_process", pv.raw("post_process") or "") or []) if x and x.strip()]
+        out["post_process"] = scripts
     # Prusa region extruders are >= 1 and "1" at print level normally means "the object's
     # extruder"; Bambu/Orca use 0 for that (Orca's legacy handler does the same rewrite).
     # Other numbers still need remapping to filament slots by the caller.

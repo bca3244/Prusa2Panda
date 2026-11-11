@@ -105,6 +105,8 @@ class _Reader:
 def _num(v: float) -> str:
     if math.isnan(v):
         return "nil"
+    if math.isinf(v):
+        return "1e308" if v > 0 else "-1e308"
     if v == int(v) and abs(v) < 1e15:
         return str(int(v))
     return f"{v:.15g}"

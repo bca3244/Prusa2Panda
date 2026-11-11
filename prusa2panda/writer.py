@@ -25,6 +25,7 @@ their own frame to stay editable, which is recovered from the emboss shape's fix
 from __future__ import annotations
 
 import math
+import re
 import zipfile
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
@@ -44,6 +45,9 @@ from .reader import (
     bed_translation,
 )
 from .transform import Transform
+
+_NUM_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\Z")
+_HEX_RE = re.compile(r"[0-9A-Fa-f]+\Z")
 
 ROOT_MODEL = "3D/3dmodel.model"
 MODEL_RELS = "3D/_rels/3dmodel.model.rels"
@@ -219,12 +223,14 @@ def _split_object(project: PrusaProject, mo: ModelObject, slot_of: Callable[[Opt
         tris = [t for t in triangles[vol.firstid:vol.lastid + 1] if t.tag == t_tag]
         if not tris:
             continue
-        idx = []
-        for t in tris:
-            idx.append((int(t.get("v1")), int(t.get("v2")), int(t.get("v3"))))
+        try:
+            idx = [(int(t.get("v1")), int(t.get("v2")), int(t.get("v3"))) for t in tris]
+        except (TypeError, ValueError):
+            warnings.append(f"object {mo.name!r}: part {vol.name!r} has malformed triangles; skipped")
+            continue
         lo = min(min(i) for i in idx)
         hi = max(max(i) for i in idx)
-        if hi >= len(vertices):
+        if lo < 0 or hi >= len(vertices):
             warnings.append(f"object {mo.name!r}: part {vol.name!r} references missing vertices; skipped")
             continue
         vsrc = [v for v in vertices[lo:hi + 1]]
@@ -244,18 +250,29 @@ def _split_object(project: PrusaProject, mo: ModelObject, slot_of: Callable[[Opt
                 except ValueError:
                     local_pts = None
         lines = ["   <mesh>\n    <vertices>\n"]
+        bad = False
         if local_pts is not None:
             for (x, y, z) in local_pts:
                 lines.append(f'     <vertex x="{_num(x)}" y="{_num(y)}" z="{_num(z)}"/>\n')
         else:
             for v in vsrc:
-                lines.append(f'     <vertex x="{v.get("x")}" y="{v.get("y")}" z="{v.get("z")}"/>\n')
+                xyz = [v.get(a) or "" for a in ("x", "y", "z")]
+                if not all(_NUM_RE.match(c.strip()) for c in xyz):
+                    bad = True
+                    break
+                lines.append(f'     <vertex x="{xyz[0].strip()}" y="{xyz[1].strip()}" z="{xyz[2].strip()}"/>\n')
+        if bad:
+            warnings.append(f"object {mo.name!r}: part {vol.name!r} has malformed vertices; skipped")
+            continue
         lines.append("    </vertices>\n    <triangles>\n")
-        painted = 0
+        painted = bad_paint = 0
         for t, (a, b, c) in zip(tris, idx):
             extra = []
             for src, dst in PAINT_ATTRS.items():
-                val = t.get(src)
+                val = (t.get(src) or "").strip()
+                if val and not _HEX_RE.match(val):
+                    bad_paint += 1
+                    continue
                 if val:
                     if src == PAINT_COLOR:
                         val = remap_paint(val, paint_map, paint_cache)
@@ -265,6 +282,8 @@ def _split_object(project: PrusaProject, mo: ModelObject, slot_of: Callable[[Opt
                     extra.append(f' {dst}="{val}"')
             lines.append(f'     <triangle v1="{a - lo}" v2="{b - lo}" v3="{c - lo}"{"".join(extra)}/>\n')
         lines.append("    </triangles>\n   </mesh>\n")
+        if bad_paint:
+            warnings.append(f"object {mo.name!r}: {bad_paint} malformed paint value(s) dropped")
         parts.append(_Part(vol, "".join(lines), len(tris), painted, transform, slot_of(vol.extruder)))
     return parts
 
@@ -413,7 +432,7 @@ def write_bambu_3mf(
     plate_center = (plan.plate_min[0] + pw / 2.0, plan.plate_min[1] + pd / 2.0)
     bw, bd = project.bed_size
     bed_center = (project.bed_origin[0] + bw / 2.0, project.bed_origin[1] + bd / 2.0)
-    legacy = False
+    legacy = project.legacy_beds
     shift_of_bed: Dict[int, tuple] = {}
     for b in plates:
         tx, ty = bed_translation(b - 1, project.bed_size, legacy)
@@ -455,13 +474,15 @@ def write_bambu_3mf(
     identify = 100
     translate = plan.object_settings
 
-    for seq, oi in enumerate(obj_order, start=1):
+    seq = 0
+    for oi in obj_order:
         mo = project.objects[oi]
-        out_index[mo.index] = seq
         parts = _split_object(project, mo, slot_of, paint_map, paint_cache, plan.slicer, warnings)
         if not parts:
             warnings.append(f"object {mo.name!r} has no geometry; skipped")
             continue
+        seq += 1  # numbers only the objects written: layer ranges / heights refer to these
+        out_index[mo.index] = seq
         obj_slot = slot_of(mo.extruder) or slot_of(1) or 1
         if len(parts) == 1 and parts[0].extruder:
             # Bambu / Orca drop the extruder of a single-part object's part: the object carries it.
@@ -667,7 +688,15 @@ def _custom_gcodes(project: PrusaProject, plates: List[int], fmap: Dict[int, int
             continue
         lines.append(f'<plate>\n<plate_info id="{p + 1}"/>\n')
         for it in bg.items:
-            ext = fmap.get(it.extruder, it.extruder)
+            ext = fmap.get(it.extruder) if fmap else it.extruder
+            if ext is None:
+                if it.type in (0, 2):  # a colour / tool change of an extruder nothing prints with
+                    w = (f"bed {bed}: {'colour' if it.type == 0 else 'tool'} change at Z {it.print_z:g} "
+                         f"for unused extruder {it.extruder} skipped")
+                    if w not in warnings:
+                        warnings.append(w)
+                    continue
+                ext = 1
             gcode = {0: "M600", 1: "M601", 2: "tool_change", 3: ""}.get(it.type, it.extra)
             lines.append(
                 f'<layer top_z="{it.print_z:g}" type="{it.type}" extruder="{ext}" color={quoteattr(it.color)} '
