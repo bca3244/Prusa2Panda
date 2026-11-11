@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.1
+
+- Fix the Windows exe crashing on every conversion with settings: the settings schemas were
+  loaded in a way PyInstaller could not see, so they were missing from the exe.
+- The release build now runs real conversions with the built exe before publishing it.
+
+## 0.1.0
 
 First version: PrusaSlicer 2.9 `.3mf` → Bambu Studio 2.x / OrcaSlicer 2.x `.3mf`.
 
