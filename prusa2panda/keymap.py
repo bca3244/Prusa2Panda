@@ -29,7 +29,6 @@ Usage:
 
 from __future__ import annotations
 
-import importlib
 import importlib.util
 import os
 from dataclasses import dataclass
@@ -39,13 +38,18 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def load_schema(name: str):
-    """'bambu' | 'orca' | 'prusa' -> generated schema module (package-relative or by path)."""
-    mod = f"{name}_schema"
+    """'bambu' | 'orca' | 'prusa' -> generated schema module.
+
+    Imported statically inside the package so that PyInstaller bundles the schemas (an
+    import by name or by file path is invisible to it and fails in the frozen exe); the
+    file-path fallback is for running this module on its own (tools/gen_schema.py)."""
     if __package__:
-        try:
-            return importlib.import_module(f".{mod}", __package__)
-        except ImportError:
-            pass
+        from . import bambu_schema, orca_schema, prusa_schema
+        mods = {"bambu": bambu_schema, "orca": orca_schema, "prusa": prusa_schema}
+        if name not in mods:
+            raise ValueError(f"unknown schema {name!r}")
+        return mods[name]
+    mod = f"{name}_schema"
     spec = importlib.util.spec_from_file_location(mod, os.path.join(_HERE, mod + ".py"))
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)

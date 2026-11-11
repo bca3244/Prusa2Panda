@@ -3,12 +3,14 @@
 # Publish a release on GitHub (Releases -> Draft a new release -> new tag such as v0.1.0 ->
 # Publish) and this workflow tests the code, builds Prusa2Panda.exe (GUI) and
 # prusa2panda-cli.exe (command line) with PyInstaller, and uploads both to that release.
-# "Run workflow" on the Actions tab builds them without a release (download them from the run).
+# "Run workflow" on the Actions tab, and every pull request, build and smoke-test them without
+# a release (download them from the run).
 name: Release
 
 on:
   release:
     types: [published]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -34,11 +36,22 @@ jobs:
 
       - name: Build exes
         run: |
-          pyinstaller --onefile --windowed --name Prusa2Panda gui_launcher.py
-          pyinstaller --onefile --console --name prusa2panda-cli cli_launcher.py
+          pyinstaller --onefile --windowed --name Prusa2Panda --collect-submodules prusa2panda gui_launcher.py
+          pyinstaller --onefile --console --name prusa2panda-cli --collect-submodules prusa2panda cli_launcher.py
 
+      # Real conversions with the frozen exe: a module PyInstaller left out only fails here.
       - name: Smoke test the command line exe
-        run: dist\prusa2panda-cli.exe --help
+        run: |
+          python tools/make_smoke_3mf.py smoke.3mf
+          dist\prusa2panda-cli.exe --info smoke.3mf
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          foreach ($slicer in "bambu", "orca") {
+            dist\prusa2panda-cli.exe --slicer $slicer --printer prusa --prusa-settings smoke.3mf "smoke_$slicer.3mf"
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            dist\prusa2panda-cli.exe --slicer $slicer --no-settings --keep-extruders smoke.3mf "smoke_${slicer}_geometry.3mf"
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            if (-not (Test-Path "smoke_$slicer.3mf")) { exit 1 }
+          }
 
       - uses: actions/upload-artifact@v4
         with:
