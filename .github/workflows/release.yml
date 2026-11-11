@@ -1,0 +1,54 @@
+# Builds the Windows exes and attaches them to a GitHub release.
+#
+# Publish a release on GitHub (Releases -> Draft a new release -> new tag such as v0.1.0 ->
+# Publish) and this workflow tests the code, builds Prusa2Panda.exe (GUI) and
+# prusa2panda-cli.exe (command line) with PyInstaller, and uploads both to that release.
+# "Run workflow" on the Actions tab builds them without a release (download them from the run).
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller pytest
+
+      - name: Run tests
+        run: python -m pytest -q tests
+
+      - name: Build exes
+        run: |
+          pyinstaller --onefile --windowed --name Prusa2Panda gui_launcher.py
+          pyinstaller --onefile --console --name prusa2panda-cli cli_launcher.py
+
+      - name: Smoke test the command line exe
+        run: dist\prusa2panda-cli.exe --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Prusa2Panda-windows
+          path: |
+            dist/Prusa2Panda.exe
+            dist/prusa2panda-cli.exe
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/Prusa2Panda.exe dist/prusa2panda-cli.exe --clobber
