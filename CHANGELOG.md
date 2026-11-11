@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2
+
+- PrusaSlicer colour changes (M600) now change colour in Bambu Studio / OrcaSlicer. Those
+  slicers write no G-code for a plain colour change, so each new colour gets its own filament
+  slot (a copy of the filament it replaces) and the colour change becomes a filament change
+  to that slot. With the PrusaSlicer printer kept, its own colour change G-code runs instead;
+  in a multi-filament print a colour change becomes a pause.
+
 ## 0.1.1
 
 - Fix the Windows exe crashing on every conversion with settings: the settings schemas were

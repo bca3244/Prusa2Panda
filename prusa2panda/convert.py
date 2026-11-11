@@ -212,6 +212,14 @@ def convert_file(
         ext_of_slot.setdefault(fmap[e], e)
 
     warnings: List[str] = []
+    keep_prusa_early = settings and _keeps_prusa_printer(printer, install)
+    colour_changes, extra_slots = _plan_colour_changes(
+        project, wanted, used, fmap, n_slots, keep_prusa_early, warnings)
+    slot_colour: Dict[int, str] = {}
+    for colour, src_ext in extra_slots:
+        n_slots += 1
+        ext_of_slot[n_slots] = src_ext
+        slot_colour[n_slots] = colour
     if project.has_full_spectrum:
         warnings.append("PrusaSlicer 'full spectrum' virtual extruders have no Bambu/Orca equivalent; not carried over")
     warnings.extend(project.read_warnings)
@@ -241,6 +249,9 @@ def convert_file(
         for s in range(1, n_slots + 1):
             e = ext_of_slot.get(s)
             c = project.extruder_colour(e) if e else ""
+            if s in slot_colour:  # a filament added for a colour change: its colour is the point
+                colours.append(slot_colour[s])
+                continue
             if keep_filament_colours or not c:
                 c = _preset_colour(tgt, install, s) or c or "#FFFFFF"
             colours.append(c)
@@ -284,6 +295,7 @@ def convert_file(
             plan.plate_size, plan.plate_min = tgt.plate
     plan.project_settings = project_settings
     plan.object_settings = object_settings
+    plan.colour_changes = colour_changes
 
     split = bed_layout == BEDS_SPLIT and len(wanted) > 1
     jobs = [([b], _bed_path(output_path, b)) for b in wanted] if split else [(wanted, output_path)]
@@ -320,6 +332,75 @@ def convert_file(
         target_description=description,
         outputs=outputs,
     )
+
+
+def _keeps_prusa_printer(printer: str, install: Optional[BambuInstall]) -> bool:
+    """Whether resolve_target will keep the PrusaSlicer printer (decided before it runs,
+    because colour changes may add filament slots)."""
+    spec = (printer or PRINTER_AUTO).strip()
+    if spec.lower() == PRINTER_PRUSA:
+        return True
+    if spec.lower() == PRINTER_AUTO:
+        return install is None or not install.selected_printer()
+    return False
+
+
+def _plan_colour_changes(project: PrusaProject, beds: List[int], used: List[int], fmap: Dict[int, int],
+                         n_slots: int, keep_prusa_printer: bool, warnings: List[str]):
+    """How to carry PrusaSlicer colour changes (M600) over.
+
+    Bambu Studio and OrcaSlicer write no G-code for a plain colour change; what changes the
+    colour there is a filament change to another filament slot. So for a single-filament
+    print each new colour gets a filament slot (a copy of the filament it replaces) and the
+    colour change becomes a change to that slot. With the PrusaSlicer printer kept, its own
+    colour change G-code runs as custom G-code instead. A colour change in a multi-filament
+    print becomes a pause, so the filament can still be swapped by hand.
+
+    Returns ({(bed, index): how}, [(colour, PrusaSlicer extruder) for each added slot])."""
+    out: Dict[tuple, tuple] = {}
+    extra: List[tuple] = []
+    items = []
+    for b in beds:
+        bg = project.custom_gcodes.get(b)
+        for i, it in enumerate(bg.items if bg else []):
+            # In a single-extruder project a colour change applies whatever its extruder number;
+            # otherwise one for an extruder nothing prints with is dropped (the writer warns).
+            if it.type == 0 and (bg.mode == "SingleExtruder" or it.extruder in fmap):
+                items.append((b, i, it))
+    if not items:
+        return out, extra
+    if keep_prusa_printer:
+        from .keymap import PrusaView
+        raw = dict(project.config.items())
+        gcode = translate.translate_gcode(PrusaView(raw).scalar("color_change_gcode") or "M600")
+        for b, i, _it in items:
+            out[(b, i)] = ("custom", gcode)
+        return out, extra
+    if len(used) > 1:
+        for b, i, _it in items:
+            out[(b, i)] = ("pause", "")
+        warnings.append(f"{len(items)} colour change(s) in a multi-filament print became pauses: "
+                        "Bambu Studio / OrcaSlicer only change colour by changing filament")
+        return out, extra
+    src = used[0] if used else 1
+    slot_of_colour = {project.extruder_colour(src).upper(): fmap.get(src, 1)}
+    next_slot = n_slots
+    for b, i, it in sorted(items, key=lambda x: (x[0], x[2].print_z)):
+        colour = (it.color or "").upper() or "#FFFFFF"
+        if colour not in slot_of_colour:
+            if next_slot >= 16:
+                out[(b, i)] = ("pause", "")
+                warnings.append("more than 16 colours: later colour changes became pauses")
+                continue
+            next_slot += 1
+            slot_of_colour[colour] = next_slot
+            extra.append((colour, src))
+        out[(b, i)] = ("tool", slot_of_colour[colour])
+    if extra:
+        warnings.append(f"colour change(s) carried over as filament changes; added {len(extra)} filament "
+                        f"slot(s) for {', '.join(c for c, _e in extra)} (assign them to AMS slots or spools when "
+                        "you print)")
+    return out, extra
 
 
 def _preset_colour(tgt: Target, install: Optional[BambuInstall], slot: int) -> str:
