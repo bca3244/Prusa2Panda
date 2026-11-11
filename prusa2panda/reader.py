@@ -25,7 +25,7 @@ import lxml.etree as ET
 
 from . import ns
 from .prusa_config import PrusaConfig
-from .transform import Transform
+from .transform import Transform, compose_chain
 
 ROOT_MODEL = "3D/3dmodel.model"
 PRINT_CONFIG = "Metadata/Slic3r_PE.config"
@@ -139,6 +139,9 @@ class PrusaProject:
     has_full_spectrum: bool = False
     bed_size: tuple = (250.0, 210.0)
     bed_origin: tuple = (0.0, 0.0)
+    legacy_beds: bool = False  # pre-2.9 project: virtual beds 1.2 x bed width apart along X
+    read_warnings: List[str] = field(default_factory=list)
+    off_bed_items: int = 0  # instances on no bed (PrusaSlicer leaves them unprinted)
 
     @property
     def bed_ids(self) -> List[int]:
@@ -175,10 +178,14 @@ class PrusaProject:
         return vals[extruder - 1] if 0 < extruder <= len(vals) else ""
 
 
+MAX_MEMBER_BYTES = 4 << 30  # uncompressed size limit per zip member
+
+
 # -- helpers ----------------------------------------------------------------------------
 
 def _parse(data: bytes):
-    parser = ET.XMLParser(recover=True, huge_tree=True)
+    # No entity expansion and no network: project files are untrusted input.
+    parser = ET.XMLParser(recover=True, huge_tree=True, resolve_entities=False, no_network=True)
     return ET.fromstring(data, parser=parser)
 
 
@@ -227,7 +234,11 @@ def read_prusa_3mf(path: str) -> PrusaProject:
             if real is None:  # case-insensitive fallback
                 low = name.lower()
                 real = next((v for k, v in names.items() if k.lower() == low), None)
-            return z.read(real) if real is not None else None
+            if real is None:
+                return None
+            if z.getinfo(real).file_size > MAX_MEMBER_BYTES:
+                raise ValueError(f"{name} in {path!r} is larger than {MAX_MEMBER_BYTES >> 20} MB; not converted")
+            return z.read(real)
 
         model_data = read(ROOT_MODEL)
         if model_data is None:
@@ -246,6 +257,7 @@ def read_prusa_3mf(path: str) -> PrusaProject:
             PrusaConfig.from_slic3r_pe_text(cfg_data.decode("utf-8", "replace")) if cfg_data else PrusaConfig()
         )
 
+        read_warnings: List[str] = []
         # Every <object> in the root model and any referenced model parts.
         trees = {ROOT_MODEL: root}
         for comp in root.iter(ns.q(ns.CORE, "component")):
@@ -278,8 +290,8 @@ def read_prusa_3mf(path: str) -> PrusaProject:
             mesh_key, chain = _resolve_mesh(key, elements)
             if mesh_key is None:
                 continue
-            for t in chain:  # component transforms (innermost first) -> item
-                transform = t.compose(transform)
+            # Component transforms, innermost first: mesh -> inner -> ... -> outer -> item.
+            transform = compose_chain(chain).compose(transform)
             if mesh_key not in object_of_key:
                 obj_el = elements[mesh_key]
                 mesh = obj_el.find(ns.q(ns.CORE, "mesh"))
@@ -292,12 +304,13 @@ def read_prusa_3mf(path: str) -> PrusaProject:
                     triangle_count=len(tris) if tris is not None else 0,
                 )
                 cfg_obj = model_cfg.get(mesh_key[1]) if mesh_key[0] == ROOT_MODEL else None
-                _apply_model_config(mo, cfg_obj)
+                _apply_model_config(mo, cfg_obj, read_warnings)
                 object_of_key[mesh_key] = len(objects)
                 objects.append(mo)
             build_items.append(BuildItem(object_of_key[mesh_key], transform, printable))
 
         project = PrusaProject(
+            read_warnings=read_warnings,
             source_path=path,
             producer=producer,
             objects=objects,
@@ -377,7 +390,7 @@ def _parse_model_config(data: Optional[bytes]) -> dict:
     return out
 
 
-def _apply_model_config(mo: ModelObject, obj_el) -> None:
+def _apply_model_config(mo: ModelObject, obj_el, warnings: List[str]) -> None:
     n_tris = mo.triangle_count
     if obj_el is None:
         mo.volumes = [Volume(0, max(n_tris - 1, 0), name=mo.name)]
@@ -389,7 +402,10 @@ def _apply_model_config(mo: ModelObject, obj_el) -> None:
     for vol_el in obj_el.findall("volume"):
         first = _int_or_none(vol_el.get("firstid"))
         last = _int_or_none(vol_el.get("lastid"))
-        if first is None or last is None or last < first or last >= n_tris:
+        if first is None or last is None or first < 0 or last < first or last >= n_tris:
+            warnings.append(
+                f"object {mo.name!r}: volume {_metadata(vol_el).get('name', '')!r} has an invalid triangle "
+                "range; skipped")
             continue
         vm = _metadata(vol_el)
         vtype = vm.get("volume_type") or ("ParameterModifier" if vm.get("modifier") == "1" else "ModelPart")
@@ -558,15 +574,32 @@ def bed_translation(index: int, bed_size: tuple, legacy: bool = False) -> tuple:
 
 
 def _item_center(project: PrusaProject, item: BuildItem) -> Optional[tuple]:
-    """XY centre of an instance's bounding box in world coordinates."""
+    """XY centre of an instance's first model part in world coordinates. PrusaSlicer
+    assigns an instance to the bed its first model part sits on (Model.cpp), so modifiers,
+    blockers and negative volumes reaching past the bed do not move it."""
     mo = project.objects[item.object_index]
     verts = mo.mesh.find(ns.q(ns.CORE, "vertices"))
     if verts is None:
         return None
+    vlist = list(verts)
+    ids = None
+    part = next((v for v in mo.volumes if v.volume_type == "ModelPart"), None)
+    tris_el = mo.mesh.find(ns.q(ns.CORE, "triangles"))
+    if part is not None and tris_el is not None:
+        tris = list(tris_el)
+        ids = set()
+        for t in tris[max(0, part.firstid):part.lastid + 1]:
+            for a in ("v1", "v2", "v3"):
+                try:
+                    ids.add(int(t.get(a)))
+                except (TypeError, ValueError):
+                    pass
     minx = miny = math.inf
     maxx = maxy = -math.inf
     t = item.transform
-    for v in verts:
+    for i, v in enumerate(vlist):
+        if ids is not None and ids and i not in ids:
+            continue
         try:
             x, y, _z = t.apply_point(float(v.get("x")), float(v.get("y")), float(v.get("z")))
         except (TypeError, ValueError):
@@ -586,8 +619,10 @@ def _assign_beds(project: PrusaProject, version: Optional[tuple]) -> None:
     from older versions only ever had one bed, but objects arranged on PrusaSlicer's
     legacy virtual beds (1.2 x bed width along X) are honoured the same way 2.9 does."""
     legacy = version is not None and version < (2, 9)
+    project.legacy_beds = legacy
     size, origin = project.bed_size, project.bed_origin
     candidates = [(i, bed_translation(i, size, legacy)) for i in range(MAX_BEDS)]
+    project.off_bed_items = 0
     for item in project.build_items:
         c = _item_center(project, item)
         item.bed = 1
@@ -598,3 +633,5 @@ def _assign_beds(project: PrusaProject, version: Optional[tuple]) -> None:
             if x0 <= c[0] <= x0 + size[0] and y0 <= c[1] <= y0 + size[1]:
                 item.bed = i + 1
                 break
+        else:
+            project.off_bed_items += 1  # parked outside every bed: kept with bed 1

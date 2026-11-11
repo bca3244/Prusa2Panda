@@ -124,6 +124,9 @@ Without `--map` or `--keep-extruders`, the extruders the project uses are compac
 1..K, so a model on extruders 3 and 5 prints from filaments 1 and 2. When run in a terminal,
 the tool asks you to confirm the mapping.
 
+OrcaSlicer 2.5 and newer install their system profiles as binary preset caches
+(`system/<Vendor>.opc`) instead of JSON files. Prusa2Panda reads both forms.
+
 The configuration folder is found in `%APPDATA%\BambuStudio` / `%APPDATA%\OrcaSlicer` on
 Windows, `~/Library/Application Support/...` on macOS, and `~/.config/...` (or flatpak) on
 Linux. The environment variables `BAMBU_STUDIO_CONFIG_DIR` / `ORCA_SLICER_CONFIG_DIR` override it.

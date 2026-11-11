@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .bambu_install import META_KEYS, SLICER_BAMBU, SLICER_ORCA, BambuInstall, strip_project_suffix
+from .keymap import load_schema
 
 PRINTER_AUTO = "auto"
 PRINTER_PRUSA = "prusa"
@@ -316,8 +317,11 @@ def resolve_target(
     tgt.printer = make_anchor(install, "machine", printer_name, w)
     pcfg = tgt.printer.resolved or {}
     if file_cfg is not None and tgt.printer.resolved is None:
-        # Not installed here: carry the file's printer as a project preset.
-        tgt.custom_printer = file_cfg
+        # Not installed here: carry the file's printer as a project preset, printer keys only
+        # (a project file also holds process and per-filament keys sized for its own filaments).
+        S = load_schema("orca" if slicer == SLICER_ORCA else "bambu")
+        keep = set(S.PRINTER_KEYS) | set(S.MACHINE_LIMITS_KEYS) | set(S.EXTRUDER_KEYS) | {"printer_settings_id"}
+        tgt.custom_printer = {k: v for k, v in file_cfg.items() if k in keep}
     if not process_name:
         process_name = str(pcfg.get("default_print_profile") or "")
     tgt.process = make_anchor(install, "process", process_name, w)
@@ -433,11 +437,11 @@ def build_project_settings(
         cfg[k] = v
     fil_keys = sorted({k for a in anchors for k in a.values})
     for k in fil_keys:
-        vals = []
+        vals: List[Optional[str]] = []
         for a in anchors:
             src = a.values if k in a.values else (a.resolved or {})
-            vals.append(str(_pick_variant_value(src, k, variant) if k in src else ""))
-        if all(vals):
+            vals.append(str(_pick_variant_value(src, k, variant)) if k in src else None)
+        if all(v is not None for v in vals):  # an empty value is a value, not an unknown one
             cfg[k] = vals
         else:  # some filament's value is unknown: fall back to self-anchoring those filaments
             for i, a in enumerate(anchors):

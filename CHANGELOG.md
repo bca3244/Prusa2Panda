@@ -13,4 +13,5 @@ First version: PrusaSlicer 2.9 `.3mf` → Bambu Studio 2.x / OrcaSlicer 2.x `.3m
   printer settings (`--prusa-settings`, `--printer prusa`), or write geometry only.
 - Preset matching: user presets are anchored on their system parents, and a Generic filament is
   picked when the material differs.
+- Reads OrcaSlicer 2.5's binary system preset caches (`system/<Vendor>.opc`).
 - CLI (`prusa2panda`) and Tkinter GUI (`prusa2panda-gui`).

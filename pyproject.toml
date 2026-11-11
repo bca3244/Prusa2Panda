@@ -9,7 +9,7 @@ description = "Convert PrusaSlicer .3mf projects to Bambu Studio / OrcaSlicer .3
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
-dependencies = ["lxml>=4.9"]
+dependencies = ["lxml>=5.0"]
 keywords = ["3mf", "bambu", "prusa", "prusaslicer", "bambustudio", "orcaslicer", "3d-printing"]
 classifiers = [
     "Programming Language :: Python :: 3",

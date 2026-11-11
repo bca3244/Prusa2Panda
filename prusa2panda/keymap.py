@@ -804,7 +804,12 @@ def serialize(schema, key: str, value, n: int = 1):
     if kind in ("points",):
         return list(value) if isinstance(value, list) else [value]
     if kind.endswith("s") and kind != "string" or kind == "pointsgroups":
-        vals = value if isinstance(value, list) else [value] * max(1, n)
+        # Only per-extruder-variant vectors repeat once per variant; any other vector
+        # (post_process, ...) is one value, not n copies of it.
+        per_variant = (key in getattr(schema, "PRINT_VARIANT_KEYS", ()) or
+                       key in getattr(schema, "FILAMENT_VARIANT_KEYS", ()) or
+                       key in getattr(schema, "PRINTER_VARIANT_KEYS", ()))
+        vals = value if isinstance(value, list) else [value] * (max(1, n) if per_variant else 1)
         if kind == "bools":
             vals = [to_bool(x) or x for x in vals]
         return [str(x) for x in vals]
@@ -836,6 +841,9 @@ def convert_print(cfg: Dict[str, str], flavor: str = "bambu", warnings: Optional
             continue
         out[tkey] = serialize(S, tkey, v, variants)
     out.update(special_print(pv, flavor, warnings, variants))
+    if "post_process" in out:  # every script, once each; none when empty
+        scripts = [x for x in (prusa_split("post_process", pv.raw("post_process") or "") or []) if x and x.strip()]
+        out["post_process"] = scripts
     # Prusa region extruders are >= 1 and "1" at print level normally means "the object's
     # extruder"; Bambu/Orca use 0 for that (Orca's legacy handler does the same rewrite).
     # Other numbers still need remapping to filament slots by the caller.
@@ -986,6 +994,15 @@ def special_print(pv: PrusaView, flavor: str, warnings: list, variants: int = 1)
 
     for k, v in support_values(pv, flavor).items():
         put(k, v)
+    # PrusaSlicer prints no brim when brim_width is 0, whatever brim_type says; Bambu / Orca
+    # read brim_type alone (and default to auto_brim), so say no_brim outright.
+    if pv.has("brim_width") or pv.has("brim_type"):
+        try:
+            width = float(pv.scalar("brim_width") or 0)
+        except ValueError:
+            width = 0.0
+        if width <= 0:
+            put("brim_type", "no_brim")
     for k, v in ironing_values(pv).items():
         put(k, v)
     if pv.has("external_perimeters_first"):

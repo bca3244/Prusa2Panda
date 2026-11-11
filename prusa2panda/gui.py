@@ -279,7 +279,7 @@ class App:
         except Exception as exc:
             messagebox.showerror("Cannot read file", str(exc))
             return
-        used = used_extruders(project)
+        used = used_extruders(project, beds)
         if used not in ([], [1]):
             self._ask_mapping(project, used, inp, outp, beds)
         else:

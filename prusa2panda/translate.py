@@ -19,8 +19,14 @@ from .target import SlotAnchor
 
 _EXTRUDER_KEYS = {
     "wall_filament", "sparse_infill_filament", "solid_infill_filament", "support_filament",
-    "support_interface_filament", "inner_wall_filament_id", "top_surface_filament_id",
+    "support_interface_filament", "outer_wall_filament_id", "inner_wall_filament_id",
+    "sparse_infill_filament_id", "internal_solid_filament_id", "top_surface_filament_id",
     "bottom_surface_filament_id", "wipe_tower_filament", "extruder",
+}
+# Orca splits Prusa's perimeter / solid infill extruder over several keys.
+_ORCA_ALSO = {
+    "outer_wall_filament_id": ("inner_wall_filament_id",),
+    "internal_solid_filament_id": ("top_surface_filament_id", "bottom_surface_filament_id"),
 }
 _PLACEHOLDER_RE = re.compile(r"\[(\w+)\]|\{(\w+)")
 
@@ -62,12 +68,15 @@ class Translator:
         out = {k: v for k, v in out.items() if k in self.S.PRINT_KEYS}
         for k in list(out):
             if k in _EXTRUDER_KEYS:
-                out[k] = self._remap(out[k], fmap)
+                out[k] = self._remap(out[k], fmap, k, self.warnings)
         return out
 
     # -- filaments -----------------------------------------------------------------------------
-    def filament_settings(self, extruder: int) -> dict:
-        """Scalar values of the PrusaSlicer filament on ``extruder`` (1-based)."""
+    def filament_settings(self, extruder: int, prusa_printer: bool = True) -> dict:
+        """Scalar values of the PrusaSlicer filament on ``extruder`` (1-based).
+
+        Filament start / end G-code is written for the PrusaSlicer printer (M900 pressure
+        advance, printer_notes checks), so it is only kept when that printer is kept."""
         if not self.cfg:
             return {}
         if self._filaments is None:
@@ -85,6 +94,15 @@ class Translator:
                 out[k] = v[min(i, len(v) - 1)]
             else:
                 out[k] = v
+        for k in ("filament_start_gcode", "filament_end_gcode"):
+            if k not in out:
+                continue
+            if prusa_printer:
+                out[k] = translate_gcode(str(out[k]))
+            else:
+                if str(out.pop(k)).strip():
+                    self._warn([f"PrusaSlicer {k.replace('_', ' ')} is not carried over to a "
+                                f"{self.flavor_name} printer (it targets the PrusaSlicer printer)"])
         return out
 
     # -- printer -------------------------------------------------------------------------------
@@ -155,17 +173,23 @@ class Translator:
             "support_style": {"support_material_style"},
             "ironing_type": {"ironing", "ironing_type"},
             "wall_sequence": {"external_perimeters_first"},
+            "brim_type": {"brim_width"},
         }
         for k, srcs in trigger.items():
-            if touched & srcs and k in special and k in allowed:
+            if touched & srcs and k in special and k in allowed and k not in out:
                 v = special[k]
                 out[k] = v if isinstance(v, str) else ",".join(v)
         for pk, tk in K.OBJECT_SPECIAL.items():
             if pk in settings and tk in (allowed | {"extruder"}):
                 out[tk] = settings[pk]
+        if self.flavor == "orca":
+            for src, extra in _ORCA_ALSO.items():
+                if src in out:
+                    for k in extra:
+                        out.setdefault(k, out[src])
         for k in list(out):
             if k in _EXTRUDER_KEYS:
-                out[k] = self._remap(out[k], fmap)
+                out[k] = self._remap(out[k], fmap, k, self.warnings)
         dropped = sorted(k for k in settings if k not in _covered(settings, out))
         if dropped:
             w.append(f"{label}: no {self.flavor_name} equivalent for {', '.join(dropped)}")
@@ -195,7 +219,9 @@ class Translator:
         return out
 
     @staticmethod
-    def _remap(value, fmap: Optional[Dict[int, int]]):
+    def _remap(value, fmap: Optional[Dict[int, int]], key: str = "", warnings: Optional[List[str]] = None):
+        """PrusaSlicer extruder number(s) -> filament slot(s). A number with no slot becomes
+        0 (the default filament) rather than pointing at some other or missing filament."""
         if not fmap:
             return value
         def one(x: str) -> str:
@@ -203,7 +229,15 @@ class Translator:
                 n = int(float(x))
             except ValueError:
                 return x
-            return x if n <= 0 else str(fmap.get(n, n))
+            if n <= 0:
+                return x
+            if n not in fmap:
+                if warnings is not None:
+                    w = f"{key or 'a setting'} uses PrusaSlicer extruder {n}, which has no filament slot; set to default"
+                    if w not in warnings:
+                        warnings.append(w)
+                return "0"
+            return str(fmap[n])
         if isinstance(value, list):
             return [one(x) for x in value]
         return one(str(value))

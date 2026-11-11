@@ -46,20 +46,47 @@ def describe(input_path: str) -> PrusaProject:
     return read_prusa_3mf(input_path)
 
 
-def used_extruders(project: PrusaProject, beds: Optional[List[int]] = None) -> List[int]:
+# PrusaSlicer keys whose value is a 1-based extruder number (0 = default / current).
+EXTRUDER_SETTING_KEYS = (
+    "extruder", "perimeter_extruder", "infill_extruder", "solid_infill_extruder",
+    "support_material_extruder", "support_material_interface_extruder", "wipe_tower_extruder",
+)
+
+
+def _ext_values(settings: Dict[str, str]) -> set:
+    out = set()
+    for k in EXTRUDER_SETTING_KEYS:
+        try:
+            n = int(float(str(settings.get(k, "0")).strip() or 0))
+        except ValueError:
+            continue
+        if n > 0:
+            out.add(n)
+    return out
+
+
+def used_extruders(project: PrusaProject, beds: Optional[List[int]] = None,
+                   include_config: bool = False) -> List[int]:
     """Sorted 1-based PrusaSlicer extruders the (selected part of the) project prints with:
-    object and part extruders plus every painted state. 0 / unset means extruder 1 for an
-    object and the object's extruder for a part."""
-    objs = sorted({bi.object_index for bi in project.build_items if not beds or bi.bed in beds})
+    object and part extruders, every painted state, extruder-valued per-object / per-part /
+    per-range settings and tool changes. 0 / unset means extruder 1 for an object and the
+    object's extruder for a part. ``include_config`` adds the print settings' own extruder
+    keys (support / wipe tower extruder), which only matter when those are translated."""
+    wanted = list(beds or project.bed_ids)
+    objs = sorted({bi.object_index for bi in project.build_items if bi.bed in wanted})
     used: set = set()
     codes: set = set()
     for oi in objs:
         mo = project.objects[oi]
         obj_ext = mo.extruder or 1
+        used |= _ext_values(mo.settings)
         for vol in mo.volumes:
             if vol.volume_type in ("ModelPart", "NegativeVolume", "ParameterModifier"):
                 if vol.volume_type == "ModelPart" or vol.extruder:
                     used.add(vol.extruder or obj_ext)
+            used |= _ext_values(vol.settings)
+        for rng in project.layer_ranges.get(mo.index, []):
+            used |= _ext_values(rng.settings)
         for tri in mo.mesh.iter(ns.q(ns.CORE, "triangle")):
             c = tri.get(PAINT_COLOR)
             if c:
@@ -69,6 +96,24 @@ def used_extruders(project: PrusaProject, beds: Optional[List[int]] = None) -> L
             used |= used_states(c)
         except PaintError:
             pass
+    if objs:
+        for b in wanted:
+            bg = project.custom_gcodes.get(b)
+            for it in (bg.items if bg else []):
+                if it.type == 2 and it.extruder > 0:  # tool change
+                    used.add(it.extruder)
+    if include_config and objs:
+        cfg = dict(project.config.items())
+        # Print-level perimeter / infill extruders yield to the object's extruder, so only the
+        # support and wipe tower extruders add filaments, and only when those are printed.
+        support = cfg.get("support_material") == "1" or any(
+            project.objects[oi].settings.get("support_material") == "1" for oi in objs)
+        keys = []
+        if support:
+            keys += ["support_material_extruder", "support_material_interface_extruder"]
+        if cfg.get("wipe_tower") == "1":
+            keys.append("wipe_tower_extruder")
+        used |= _ext_values({k: cfg.get(k, "0") for k in keys})
     used.discard(0)
     if not used and objs:
         used.add(1)
@@ -147,6 +192,8 @@ def convert_file(
     With several beds, ``bed_layout`` puts each on its own plate of one file (default) or
     writes one file per bed (``output_bedN.3mf``).
     """
+    if os.path.abspath(output_path) == os.path.abspath(input_path):
+        raise ValueError("the output file must not be the input file")
     project = read_prusa_3mf(input_path)
     slicer = pick_slicer(slicer, config_dir)
     install = BambuInstall.find(slicer, config_dir)
@@ -155,7 +202,9 @@ def convert_file(
         raise ValueError(f"bed(s) {beds} not in this project; it has beds {project.bed_ids}")
     wanted = wanted or project.bed_ids
 
-    used = used_extruders(project, wanted)
+    translating = settings and (prusa_settings or not use_base_presets or printer.strip().lower() == PRINTER_PRUSA
+                                or install is None)
+    used = used_extruders(project, wanted, include_config=translating)
     fmap = _final_map(used, filament_map)
     n_slots = max([1] + list(fmap.values()))
     ext_of_slot: Dict[int, int] = {}
@@ -165,6 +214,10 @@ def convert_file(
     warnings: List[str] = []
     if project.has_full_spectrum:
         warnings.append("PrusaSlicer 'full spectrum' virtual extruders have no Bambu/Orca equivalent; not carried over")
+    warnings.extend(project.read_warnings)
+    if project.off_bed_items:
+        warnings.append(f"{project.off_bed_items} instance(s) sit outside every PrusaSlicer bed (PrusaSlicer "
+                        "does not print them); they are placed with bed 1")
     if project.has_cut_info:
         warnings.append("cut-object connector links are not carried over (the cut parts are)")
     if project.extruder_count > 16 or n_slots > 16:
@@ -199,7 +252,8 @@ def convert_file(
             if tgt.process is not None and tgt.process.resolved:
                 variants = max(1, len(tgt.process.resolved.get("print_extruder_variant") or []))
             extra_process = tr.process_settings(variants, fmap)
-            extra_filament = [tr.filament_settings(ext_of_slot.get(s, s)) for s in range(1, n_slots + 1)]
+            extra_filament = [tr.filament_settings(ext_of_slot.get(s, s), keep_prusa_printer)
+                              for s in range(1, n_slots + 1)]
             if not use_base_presets and tgt.process is not None:
                 tgt.process.inherits = ""
                 tgt.process.values = {}

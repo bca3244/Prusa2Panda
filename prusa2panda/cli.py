@@ -102,9 +102,9 @@ def _parse_beds(chunks) -> list | None:
     return beds
 
 
-def _prompt_filament_map(project) -> dict | None:
+def _prompt_filament_map(project, beds=None) -> dict | None:
     """Show the file's extruders and ask how to map them. None = auto-compact."""
-    used = used_extruders(project)
+    used = used_extruders(project, beds)
     if used in ([], [1]):
         return None  # single colour on extruder 1: nothing to decide
     print(f"This file uses {len(used)} extruder(s):")
@@ -135,7 +135,7 @@ def _cmd_convert(args) -> int:
     elif args.keep_extruders:
         filament_map = {}
     elif sys.stdin.isatty() and sys.stdout.isatty():
-        filament_map = _prompt_filament_map(describe(args.input))
+        filament_map = _prompt_filament_map(describe(args.input), beds)
 
     result = convert_file(
         args.input,
@@ -282,7 +282,11 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.list_printers:
-        return _cmd_list_printers(args)
+        try:
+            return _cmd_list_printers(args)
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     if args.info:
         args.input = args.info
         try:

@@ -23,6 +23,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from . import orca_cache
+
 SLICER_BAMBU = "bambu"
 SLICER_ORCA = "orca"
 
@@ -34,7 +36,8 @@ KINDS = ("machine", "process", "filament")
 # Keys of a preset JSON that are bookkeeping, not settings.
 META_KEYS = frozenset({
     "name", "from", "version", "inherits", "type", "instantiation", "setting_id", "include",
-    "base_id", "updated_time", "user_id", "is_custom_defined", "description",
+    "base_id", "updated_time", "user_id", "is_custom_defined", "description", "sub_path",
+    "renamed_from",
 })
 
 _SUFFIX_3MF = re.compile(r"\s*\((?:[^()]*\.3mf)\)\s*$", re.IGNORECASE)
@@ -269,6 +272,25 @@ class BambuInstall:
                             continue
                         # first definition wins (vendor files are read in name order)
                         index.setdefault((kind, name), Preset(kind, name, True, data, path, vendor))
+            # OrcaSlicer 2.5+: vendors installed only as a binary preset cache (<Vendor>.opc).
+            # A vendor that also has its JSON profile (after a profile update) uses the JSON.
+            for fn in sorted(os.listdir(sys_dir)):
+                if not fn.lower().endswith(".opc"):
+                    continue
+                vendor = os.path.splitext(fn)[0]
+                if os.path.isfile(os.path.join(sys_dir, vendor + ".json")):
+                    continue
+                path = os.path.join(sys_dir, fn)
+                try:
+                    cache = orca_cache.read_vendor_cache(path)
+                except Exception:  # noqa: BLE001 - one unreadable vendor must not stop the rest
+                    continue
+                for m in cache.models:
+                    index.setdefault(("machine_model", m["name"]), Preset("machine_model", m["name"], True, m, path, vendor))
+                for kind, entries in (("machine", cache.machine), ("process", cache.process),
+                                      ("filament", cache.filament)):
+                    for data in entries:
+                        index.setdefault((kind, data["name"]), Preset(kind, data["name"], True, data, path, vendor))
         self._system_index = index
         return index
 
