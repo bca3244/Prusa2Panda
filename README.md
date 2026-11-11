@@ -136,9 +136,17 @@ Linux. The environment variables `BAMBU_STUDIO_CONFIG_DIR` / `ORCA_SLICER_CONFIG
 ```
 pip install pyinstaller
 pyinstaller --onefile --windowed --name Prusa2Panda gui_launcher.py
+pyinstaller --onefile --console --name prusa2panda-cli cli_launcher.py
 ```
 
-The result lands in `dist\Prusa2Panda.exe`.
+The results land in `dist\Prusa2Panda.exe` (GUI) and `dist\prusa2panda-cli.exe` (command line).
+
+## Releases
+
+Publishing a GitHub release (Releases → *Draft a new release* → new tag such as `v0.1.0` →
+*Publish release*) runs `.github/workflows/release.yml`. It runs the tests on Windows, builds
+both exes and attaches them to the release. *Run workflow* on the Actions tab builds them
+without a release.
 
 ## What does not carry over
 
