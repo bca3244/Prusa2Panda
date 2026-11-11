@@ -23,7 +23,7 @@ down the tree, innermost-first: ``child * parent`` in this row-vector convention
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable
 
 IDENTITY_12 = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
 
@@ -93,6 +93,29 @@ class Transform:
                     + a[i][3] * b[3][j]
                 )
         return Transform(tuple(res))
+
+    def inverse(self) -> "Transform":
+        """The inverse affine transform (row-vector convention)."""
+        m = self.m
+        a = ((m[0], m[1], m[2]), (m[3], m[4], m[5]), (m[6], m[7], m[8]))
+        det = self.det3()
+        if abs(det) < 1e-300:
+            raise ValueError("singular transform")
+        inv = [[0.0] * 3 for _ in range(3)]
+        for i in range(3):
+            for j in range(3):
+                r = [k for k in range(3) if k != j]
+                c = [k for k in range(3) if k != i]
+                minor = a[r[0]][c[0]] * a[r[1]][c[1]] - a[r[0]][c[1]] * a[r[1]][c[0]]
+                inv[i][j] = (-1) ** (i + j) * minor / det
+        t = (m[9], m[10], m[11])
+        ti = tuple(-(t[0] * inv[0][j] + t[1] * inv[1][j] + t[2] * inv[2][j]) for j in range(3))
+        return Transform((inv[0][0], inv[0][1], inv[0][2], inv[1][0], inv[1][1], inv[1][2],
+                          inv[2][0], inv[2][1], inv[2][2], ti[0], ti[1], ti[2]))
+
+    @classmethod
+    def translation(cls, x: float, y: float, z: float) -> "Transform":
+        return cls((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, float(x), float(y), float(z)))
 
     def is_identity(self, tol: float = 1e-12) -> bool:
         return all(abs(x - y) <= tol for x, y in zip(self.m, IDENTITY_12))
