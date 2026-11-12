@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prusa2Panda</title>
+<meta name="description" content="Convert PrusaSlicer .3mf projects to Bambu Studio / OrcaSlicer .3mf projects, in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23fa6831'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-6' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <h1>Prusa2Panda <span class="sub">PrusaSlicer → Bambu Studio / OrcaSlicer</span></h1>
+    <p class="lede">Convert a PrusaSlicer <code>.3mf</code> project into a Bambu Studio or OrcaSlicer
+      project: parts on the right filaments in the right colours, painting and editable text intact.
+      Everything runs in your browser; your file is not uploaded anywhere.</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="boot" class="boot" role="status" aria-live="polite">
+    <span class="spinner" aria-hidden="true"></span> <span id="boot-text">Starting…</span>
+  </div>
+
+  <section class="card" aria-labelledby="h-file">
+    <h2 id="h-file"><span class="step">1</span> PrusaSlicer project</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".3mf" hidden>
+      <span id="drop-text"><strong>Choose a .3mf</strong> or drop it here</span>
+    </label>
+    <div id="info" class="info" hidden></div>
+    <div id="beds-row" class="field" hidden>
+      <span class="label">Beds</span>
+      <div id="beds" class="chips"></div>
+      <label class="check"><input type="checkbox" id="split"> One file per bed (default: one file, each bed on its own plate)</label>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-target">
+    <h2 id="h-target"><span class="step">2</span> Target</h2>
+    <div class="field">
+      <span class="label">Slicer</span>
+      <div class="seg" role="radiogroup" id="slicers">
+        <label><input type="radio" name="slicer" value="bambu" checked> Bambu Studio</label>
+        <label><input type="radio" name="slicer" value="orca"> OrcaSlicer</label>
+      </div>
+      <p class="hint" id="profile-version"></p>
+    </div>
+
+    <div class="field">
+      <span class="label">Settings</span>
+      <label class="radio"><input type="radio" name="settings" value="presets" checked>
+        <span><strong>Use the slicer presets below</strong>; bring over the PrusaSlicer colours, extruders,
+        painting, text, per-part settings and colour changes (recommended)</span></label>
+      <label class="radio"><input type="radio" name="settings" value="prusa">
+        <span><strong>Also bring the PrusaSlicer print and filament settings</strong> as changes on top of
+        those presets (they show as “modified”)</span></label>
+      <label class="radio"><input type="radio" name="settings" value="none">
+        <span><strong>Geometry only</strong> (no slicer settings)</span></label>
+    </div>
+
+    <div class="grid" id="preset-fields">
+      <label class="field" id="vendor-field" hidden>
+        <span class="label">Printer vendor</span>
+        <select id="vendor"></select>
+      </label>
+      <label class="field">
+        <span class="label">Printer</span>
+        <select id="printer"></select>
+      </label>
+      <div class="field" id="printer-file-field" hidden>
+        <span class="label">Preset file</span>
+        <input type="file" id="printer-file" accept=".3mf,.json">
+        <p class="hint" id="printer-file-info">A Bambu Studio / OrcaSlicer project (.3mf) or an exported printer preset (.json).
+          Its printer, process and filaments are used.</p>
+      </div>
+      <label class="field" id="process-field">
+        <span class="label">Process</span>
+        <select id="process"></select>
+      </label>
+    </div>
+    <p class="hint">Only the slicer’s own (system) presets can be picked here; your custom presets live on your PC.
+      Switch to them after opening the file, or use the desktop app, which reads them.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-fil" id="fil-card" hidden>
+    <h2 id="h-fil"><span class="step">3</span> Filaments</h2>
+    <p class="hint">Each PrusaSlicer extruder goes to a filament slot (for example an AMS slot 1–4).
+      “Auto” takes the printer’s default filament, or a Generic one of the PrusaSlicer material when that differs.</p>
+    <table class="fil">
+      <thead><tr><th>PrusaSlicer extruder</th><th>Slot</th><th id="fil-preset-head">Filament preset</th></tr></thead>
+      <tbody id="fil-rows"></tbody>
+    </table>
+    <label class="check"><input type="checkbox" id="keep-numbers"> Keep the original extruder numbers as slot numbers</label>
+  </section>
+
+  <section class="card">
+    <button id="convert" class="primary" disabled>Convert</button>
+    <div id="result" class="result" aria-live="polite"></div>
+  </section>
+</main>
+
+<footer class="wrap foot">
+  <p><a href="https://github.com/bca3244/prusa2panda">Prusa2Panda</a> <span id="app-version"></span> ·
+    MIT licence · desktop builds for Windows, macOS and Linux read your own slicer presets:
+    <a href="https://github.com/bca3244/prusa2panda/releases">Releases</a></p>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

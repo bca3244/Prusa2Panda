@@ -268,6 +268,7 @@ def resolve_target(
         return tgt
 
     file_cfg: Optional[dict] = None
+    locked: List[bool] = []  # per selected filament: keep it whatever its material
     if spec.lower() == PRINTER_AUTO:
         if install is None:
             tgt.description = f"{tgt.display_name} configuration not found; PrusaSlicer printer kept as a custom printer"
@@ -279,6 +280,7 @@ def resolve_target(
             return tgt
         process_name = _resolve_selected(install, "process", sel.process)
         filaments = [_resolve_selected(install, "filament", f) for f in sel.filaments]
+        locked = list(sel.filament_locked)
         tgt.bed_type = _BED_TYPES[slicer].get(sel.bed_type, "")
         source = f"{tgt.display_name} {install.version} (currently selected printer)".replace("  ", " ")
     elif os.path.isfile(spec):
@@ -304,6 +306,7 @@ def resolve_target(
         if sel.printer == spec:
             process_name = _resolve_selected(install, "process", sel.process)
             filaments = [_resolve_selected(install, "filament", f) for f in sel.filaments]
+            locked = list(sel.filament_locked)
         else:
             process_name, filaments = "", []
             if slicer == SLICER_ORCA:
@@ -326,11 +329,16 @@ def resolve_target(
         process_name = str(pcfg.get("default_print_profile") or "")
     tgt.process = make_anchor(install, "process", process_name, w)
     default_fil = _first(pcfg.get("default_filament_profile"))
+    if len(locked) != len(filaments) or not all(filaments):
+        locked = []
     filaments = [f for f in filaments if f] or ([default_fil] if default_fil else [])
     for i in range(max(1, n_filaments)):
         cur = filaments[i] if i < len(filaments) else (filaments[-1] if filaments else "")
         ptype = prusa_types[i] if i < len(prusa_types) else ""
-        name = pick_filament(install, cur, printer_name, ptype, default_fil) if install else cur
+        if i < len(locked) and locked[i]:
+            name = cur
+        else:
+            name = pick_filament(install, cur, printer_name, ptype, default_fil) if install else cur
         tgt.filaments.append(make_anchor(install, "filament", name, w))
     for a in [tgt.printer, tgt.process, *tgt.filaments]:
         if a.note == "not installed" and install is not None:
