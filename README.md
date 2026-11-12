@@ -72,6 +72,20 @@ installed printers) and writes `project_settings.config` against it:
 
 If no Bambu Studio / OrcaSlicer configuration is found, `auto` falls back to `prusa`.
 
+## Web version
+
+**https://bca3244.github.io/Prusa2Panda/** converts in your browser, with nothing to install.
+It runs the same converter (in [Pyodide](https://pyodide.org)); your file stays on your PC.
+
+The difference: a web page cannot read your Bambu Studio / OrcaSlicer configuration, so you pick
+a stock printer, process and filaments of that slicer. The converted file references them by
+name, and the slicer fills in their values when it opens the file. Your own custom presets are
+only offered by the desktop app (or switch to them after opening the file). The preset lists come
+from the latest Bambu Studio and OrcaSlicer releases and are rebuilt every week.
+
+Build it yourself with `tools/build_web.py` (see its docstring) and serve the folder with any
+static web server.
+
 ## Download
 
 Each [release](https://github.com/bca3244/prusa2panda/releases) has ready-made builds. No

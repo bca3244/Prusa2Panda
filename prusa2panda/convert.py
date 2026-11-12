@@ -164,7 +164,19 @@ def current_printer(slicer: str = SLICER_AUTO, config_dir: Optional[str] = None)
 def _final_map(used: List[int], filament_map: Optional[Dict[int, int]]) -> Dict[int, int]:
     if filament_map is None:
         return suggest_filament_map(used)
-    return {e: int(filament_map.get(e, e)) for e in used}
+    out = {e: int(filament_map[e]) for e in used if e in filament_map}
+    # An extruder the map does not name (a support / wipe tower extruder that only counts when
+    # the print settings are translated) keeps its number unless another extruder already went
+    # to that slot: then it takes the next free slot instead of sharing it.
+    taken = set(out.values())
+    for e in used:
+        if e not in out:
+            slot = e
+            while filament_map and slot in taken:
+                slot += 1
+            out[e] = slot
+            taken.add(slot)
+    return out
 
 
 def convert_file(
@@ -180,6 +192,7 @@ def convert_file(
     config_dir: Optional[str] = None,
     slicer: str = SLICER_AUTO,
     bed_layout: str = BEDS_PLATES,
+    install: Optional[BambuInstall] = None,
 ) -> ConversionResult:
     """Convert a PrusaSlicer .3mf at ``input_path`` to a Bambu Studio / OrcaSlicer .3mf.
 
@@ -191,12 +204,17 @@ def convert_file(
     slicer defaults instead. ``printer`` picks the printer preset (see target.resolve_target).
     With several beds, ``bed_layout`` puts each on its own plate of one file (default) or
     writes one file per bed (``output_bedN.3mf``).
+    ``install`` replaces the slicer configuration found on this computer (the web version
+    passes a preset table, see preset_table.TableInstall); ``slicer`` then is its slicer.
     """
     if os.path.abspath(output_path) == os.path.abspath(input_path):
         raise ValueError("the output file must not be the input file")
     project = read_prusa_3mf(input_path)
-    slicer = pick_slicer(slicer, config_dir)
-    install = BambuInstall.find(slicer, config_dir)
+    if install is not None:
+        slicer = install.slicer
+    else:
+        slicer = pick_slicer(slicer, config_dir)
+        install = BambuInstall.find(slicer, config_dir)
     wanted = [b for b in (beds or project.bed_ids) if b in project.bed_ids]
     if beds and not wanted:
         raise ValueError(f"bed(s) {beds} not in this project; it has beds {project.bed_ids}")

@@ -89,6 +89,9 @@ class Selection:
     filaments: List[str] = field(default_factory=list)
     filament_colours: List[str] = field(default_factory=list)
     bed_type: str = ""  # int enum as stored in the app config, may be ""
+    # Per filament slot: True keeps that filament even when its material differs from the
+    # PrusaSlicer filament (the web version's explicit picks); the app config never sets it.
+    filament_locked: List[bool] = field(default_factory=list)
 
 
 class BambuInstall:

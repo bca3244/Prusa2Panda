@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Web version** at https://bca3244.github.io/Prusa2Panda/: converts in the browser (the same
+  converter, run with Pyodide; the file is not uploaded). It picks from the stock Bambu Studio /
+  OrcaSlicer printers, processes and filaments of the latest slicer release, references them by
+  name, and has the same settings options as the desktop app. Your own custom presets are only
+  available in the desktop app.
 - A release whose tag does not match the version in `pyproject.toml` / `prusa2panda/__init__.py`
   (or has no CHANGELOG section) fails before anything is built.
 
