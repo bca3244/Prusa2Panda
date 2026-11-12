@@ -33,6 +33,9 @@ def check(case: dict) -> list:
         errs.append(f"system presets should not inherit: {cfg.get('inherits_group')}")
     if not cfg.get("print_settings_id") or not all(cfg.get("filament_settings_id") or [""]):
         errs.append("process / filament preset names missing")
+    want = case.get("expect_filaments")
+    if want and cfg.get("filament_settings_id") != want:
+        errs.append(f"filaments {cfg.get('filament_settings_id')}, expected {want}")
     if case.get("filament") and cfg.get("filament_settings_id") != [case["filament"]]:
         errs.append(f"filaments {cfg.get('filament_settings_id')}, expected [{case['filament']!r}]")
     if case["settings"] == "presets" and any(diffs):

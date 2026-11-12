@@ -36,7 +36,9 @@ function serve(root) {
 
 // Each case: the page settings, then what check_web_outputs.py expects of the file.
 const CASES = [
-  { name: "bambu_presets", slicer: "bambu", printer: "Bambu Lab P1S 0.4 nozzle", settings: "presets" },
+  // The smoke project's only extruder is PETG: Auto must swap the PLA default for Generic PETG.
+  { name: "bambu_presets", slicer: "bambu", printer: "Bambu Lab P1S 0.4 nozzle", settings: "presets",
+    expect_filaments: ["Generic PETG"] },
   { name: "bambu_prusa-settings", slicer: "bambu", printer: "Bambu Lab X1 Carbon 0.4 nozzle", settings: "prusa" },
   { name: "orca_presets", slicer: "orca", vendor: "BBL", printer: "Bambu Lab P2S 0.4 nozzle", settings: "presets" },
   // An explicit filament pick is kept even though the PrusaSlicer filament is PETG.
