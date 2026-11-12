@@ -72,7 +72,34 @@ installed printers) and writes `project_settings.config` against it:
 
 If no Bambu Studio / OrcaSlicer configuration is found, `auto` falls back to `prusa`.
 
-## Install
+## Download
+
+Each [release](https://github.com/bca3244/prusa2panda/releases) has ready-made builds. No
+Python needed.
+
+| Platform | GUI | Command line |
+|---|---|---|
+| Windows | `Prusa2Panda.exe` | `prusa2panda-cli.exe` |
+| macOS, Apple silicon (M1 and newer) | `Prusa2Panda-macos-arm64.dmg` | `prusa2panda-cli-macos-arm64.tar.gz` |
+| macOS, Intel | `Prusa2Panda-macos-x86_64.dmg` | `prusa2panda-cli-macos-x86_64.tar.gz` |
+| Linux x86_64 (glibc 2.35+: Ubuntu 22.04, Debian 12, Fedora 36 and newer) | `Prusa2Panda-linux-x86_64.tar.gz` (both binaries) | same archive |
+
+**macOS: the app is not signed or notarized**, so Gatekeeper blocks it the first time. Open the
+`.dmg`, drag *Prusa2Panda* to *Applications*, then:
+
+- macOS 14 and older: right-click (or Control-click) *Prusa2Panda* in Applications → *Open* →
+  *Open*.
+- macOS 15 and newer: double-click it once, dismiss the warning, then go to *System Settings →
+  Privacy & Security*, scroll down and click *Open Anyway* next to Prusa2Panda.
+- Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/Prusa2Panda.app`
+
+The command line tool needs the same once: `xattr -d com.apple.quarantine prusa2panda-cli`.
+You only have to do this once per download.
+
+**Linux:** unpack and run, e.g. `tar -xzf Prusa2Panda-linux-x86_64.tar.gz && ./Prusa2Panda`.
+The GUI needs an X11 or XWayland desktop.
+
+## Install from source
 
 You need Python 3.9 or newer.
 
@@ -131,22 +158,27 @@ The configuration folder is found in `%APPDATA%\BambuStudio` / `%APPDATA%\OrcaSl
 Windows, `~/Library/Application Support/...` on macOS, and `~/.config/...` (or flatpak) on
 Linux. The environment variables `BAMBU_STUDIO_CONFIG_DIR` / `ORCA_SLICER_CONFIG_DIR` override it.
 
-## Building the exe yourself
+## Building the binaries yourself
 
 ```
 pip install pyinstaller
-pyinstaller --onefile --windowed --name Prusa2Panda gui_launcher.py
-pyinstaller --onefile --console --name prusa2panda-cli cli_launcher.py
+pyinstaller --onefile --windowed --name Prusa2Panda --collect-submodules prusa2panda gui_launcher.py
+pyinstaller --onefile --console --name prusa2panda-cli --collect-submodules prusa2panda cli_launcher.py
 ```
 
-The results land in `dist\Prusa2Panda.exe` (GUI) and `dist\prusa2panda-cli.exe` (command line).
+The results land in `dist/`: `Prusa2Panda.exe` / `prusa2panda-cli.exe` on Windows,
+`Prusa2Panda` / `prusa2panda-cli` on Linux. On macOS, drop `--onefile` from the GUI line to
+get `dist/Prusa2Panda.app`. PyInstaller only builds for the platform (and, on macOS, the CPU
+architecture) it runs on.
 
 ## Releases
 
-Publishing a GitHub release (Releases → *Draft a new release* → new tag such as `v0.1.0` →
-*Publish release*) runs `.github/workflows/release.yml`. It runs the tests on Windows, builds
-both exes and attaches them to the release. *Run workflow* on the Actions tab builds them
-without a release.
+Publishing a GitHub release (Releases → *Draft a new release* → new tag such as `v0.2.0` →
+*Publish release*) runs `.github/workflows/release.yml`. On Windows, macOS (Apple silicon and
+Intel) and Linux it runs the tests, builds the GUI and the command line tool, converts a small
+test project with the built binary, checks that the GUI starts, and attaches the builds to the
+release. *Run workflow* on the Actions tab, and every pull request, build them without a
+release.
 
 ## What does not carry over
 
