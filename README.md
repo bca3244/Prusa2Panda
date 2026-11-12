@@ -74,7 +74,7 @@ If no Bambu Studio / OrcaSlicer configuration is found, `auto` falls back to `pr
 
 ## Web version
 
-**https://bca3244.github.io/prusa2panda/** converts in your browser, with nothing to install.
+**https://bca3244.github.io/Prusa2Panda/** converts in your browser, with nothing to install.
 It runs the same converter (in [Pyodide](https://pyodide.org)); your file stays on your PC.
 
 The difference: a web page cannot read your Bambu Studio / OrcaSlicer configuration, so you pick
