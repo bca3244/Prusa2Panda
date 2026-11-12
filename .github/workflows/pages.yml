@@ -20,7 +20,8 @@ permissions:
 
 concurrency:
   group: pages-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push supersedes a pull request run, but never cut a deployment of main short.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -43,25 +44,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "bambu=$(gh release view -R bambulab/BambuStudio --json tagName -q .tagName)" >> "$GITHUB_OUTPUT"
-          echo "orca=$(gh release view -R OrcaSlicer/OrcaSlicer --json tagName -q .tagName)" >> "$GITHUB_OUTPUT"
+          for pair in bambu=bambulab/BambuStudio orca=OrcaSlicer/OrcaSlicer; do
+            tag=$(gh release view -R "${pair#*=}" --json tagName -q .tagName)
+            # Only plain version tags: the tag ends up in shell commands below.
+            [[ "$tag" =~ ^v?[0-9][0-9.]*$ ]] || { echo "unexpected ${pair%%=*} tag: '$tag'"; exit 1; }
+            echo "${pair%%=*}=$tag" >> "$GITHUB_OUTPUT"
+          done
 
       - name: Fetch their bundled profiles
+        env:
+          BAMBU_TAG: ${{ steps.rel.outputs.bambu }}
+          ORCA_TAG: ${{ steps.rel.outputs.orca }}
         run: |
           fetch() {  # repo tag dir paths...
             local repo=$1 tag=$2 dir=$3; shift 3
             git clone -q --depth 1 --filter=blob:none --sparse --branch "$tag" "https://github.com/$repo" "$dir"
             git -C "$dir" sparse-checkout set --no-cone "$@"
           }
-          fetch bambulab/BambuStudio "${{ steps.rel.outputs.bambu }}" profiles-bambu \
+          fetch bambulab/BambuStudio "$BAMBU_TAG" profiles-bambu \
             '/resources/profiles/BBL/' '/resources/profiles/BBL.json'
-          fetch OrcaSlicer/OrcaSlicer "${{ steps.rel.outputs.orca }}" profiles-orca '/resources/profiles/'
+          fetch OrcaSlicer/OrcaSlicer "$ORCA_TAG" profiles-orca '/resources/profiles/'
 
       - name: Build the site
+        env:
+          BAMBU_TAG: ${{ steps.rel.outputs.bambu }}
+          ORCA_TAG: ${{ steps.rel.outputs.orca }}
         run: |
           python tools/build_web.py --out _site \
-            --bambu-profiles profiles-bambu/resources/profiles --bambu-version "${{ steps.rel.outputs.bambu }}" \
-            --orca-profiles profiles-orca/resources/profiles --orca-version "${{ steps.rel.outputs.orca }}"
+            --bambu-profiles profiles-bambu/resources/profiles --bambu-version "$BAMBU_TAG" \
+            --orca-profiles profiles-orca/resources/profiles --orca-version "$ORCA_TAG"
 
       - uses: actions/setup-node@v4
         with:

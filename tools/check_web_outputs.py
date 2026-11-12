@@ -33,6 +33,8 @@ def check(case: dict) -> list:
         errs.append(f"system presets should not inherit: {cfg.get('inherits_group')}")
     if not cfg.get("print_settings_id") or not all(cfg.get("filament_settings_id") or [""]):
         errs.append("process / filament preset names missing")
+    if case.get("filament") and cfg.get("filament_settings_id") != [case["filament"]]:
+        errs.append(f"filaments {cfg.get('filament_settings_id')}, expected [{case['filament']!r}]")
     if case["settings"] == "presets" and any(diffs):
         errs.append(f"name-only presets expected, got diffs {diffs}")
     if case["settings"] == "prusa" and not (diffs and diffs[0]):
@@ -49,8 +51,8 @@ def main(argv) -> int:
         errs = check(c)
         print(f"{c['name']}: {'OK' if not errs else '; '.join(errs)}")
         bad += bool(errs)
-    if len(cases) < 4:
-        print("expected 4 cases")
+    if len(cases) < 5:
+        print("expected 5 cases")
         bad += 1
     return 1 if bad else 0
 

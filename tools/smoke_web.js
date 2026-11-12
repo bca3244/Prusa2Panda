@@ -39,6 +39,9 @@ const CASES = [
   { name: "bambu_presets", slicer: "bambu", printer: "Bambu Lab P1S 0.4 nozzle", settings: "presets" },
   { name: "bambu_prusa-settings", slicer: "bambu", printer: "Bambu Lab X1 Carbon 0.4 nozzle", settings: "prusa" },
   { name: "orca_presets", slicer: "orca", vendor: "BBL", printer: "Bambu Lab P2S 0.4 nozzle", settings: "presets" },
+  // An explicit filament pick is kept even though the PrusaSlicer filament is PETG.
+  { name: "bambu_locked-filament", slicer: "bambu", printer: "Bambu Lab P1S 0.4 nozzle", settings: "presets",
+    filament: "Generic PLA" },
   { name: "orca_prusa-printer", slicer: "orca", printer: "__prusa__", settings: "prusa" },
 ];
 
@@ -90,6 +93,7 @@ async function main() {
     await page.waitForFunction((p) => [...document.querySelectorAll("#printer option")].some((o) => o.value === p), c.printer);
     await page.selectOption("#printer", c.printer);
     await page.check(`input[name=settings][value=${c.settings}]`);
+    if (c.printer !== "__prusa__") await page.selectOption("#fil-rows tr select", c.filament || "");
     await page.waitForFunction(() => !document.querySelector("#convert").disabled, null, { timeout: 60000 });
     const [download] = await Promise.all([
       page.waitForEvent("download", { timeout: 120000 }),

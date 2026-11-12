@@ -26,3 +26,8 @@ so the work can resume after an interruption. Delete this file once the web vers
   headless Chromium (4 modes); the Bambu output is byte-identical to the native-Python conversion.
   Local runs need `--cdn-dir` (jsDelivr is blocked in the cloud sandbox) with a stand-in lxml.
 - Next: first CI run of pages.yml, README/CHANGELOG, Fable review, PR, ask Brian to enable Pages.
+- Fable review done (findings in the PR thread). Fixed: locked picks on colour-change slots,
+  unmapped support/wipe-tower extruder sharing a slot (`_final_map`, desktop too), empty picks
+  misaligning locks, stale filament rows, URL revoking, prefs selector, double-click races,
+  release tags in shell (now validated + via env), Pages cancel-in-progress on main, preset-file
+  hint. Smoke test now also checks an explicit (locked) filament pick.

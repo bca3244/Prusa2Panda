@@ -212,12 +212,15 @@ async function onPrinterFile() {
 // -- project ----------------------------------------------------------------------------------
 async function onFile(file) {
   if (!file) return;
+  $("file").value = "";
   if (!pythonReady) {
     $("drop-text").textContent = "Still starting the converter… try again in a moment.";
     return;
   }
   state.project = null;
   state.fileName = file.name;
+  $("fil-rows").replaceChildren();  // a new project starts from its own suggestions
+  revokeDownloads();
   $("drop-text").textContent = `Reading ${file.name}…`;
   $("result").replaceChildren();
   updateButton();
@@ -270,6 +273,7 @@ async function onBedsChange() {
     const keep = state.project;
     const fresh = await call("inspect", { beds: selectedBeds() });
     state.project = Object.assign({}, keep, { used: fresh.used, suggested_map: fresh.suggested_map });
+    $("fil-rows").replaceChildren();
     renderFilaments();
   } catch (e) { /* keep the previous list */ }
   updateButton();
@@ -324,7 +328,7 @@ function filamentMap() {
   const map = {};
   for (const tr of $("fil-rows").querySelectorAll("tr")) {
     const v = Number(tr.querySelector("input").value);
-    if (!Number.isInteger(v) || v < 1) return null;
+    if (!Number.isInteger(v) || v < 1 || v > 64) return null;
     map[tr.dataset.ext] = v;
   }
   return map;
@@ -333,7 +337,7 @@ function filamentMap() {
 function updateButton() {
   const p = $("printer").value;
   const beds = [...$("beds").querySelectorAll("input")];
-  const ok = Boolean(pythonReady && state.project && !state.busy && filamentMap() !== null &&
+  const ok = Boolean(pythonReady && state.project && !state.busy && !loads && filamentMap() !== null &&
     (!beds.length || beds.some((b) => b.checked)) && (p !== FILE || state.printerFile));
   $("convert").disabled = !ok;
 }
@@ -376,13 +380,10 @@ async function onConvert() {
     const d = printerDefaults(t.json, printer);
     const slots = Math.max(1, ...Object.values(fmap));
     const fils = Array.from({ length: slots }, () => ({ name: d.fil, locked: false }));
-    const seen = new Set();
     for (const tr of $("fil-rows").querySelectorAll("tr")) {
       const slot = Number(tr.querySelector("input").value);
       const sel = tr.querySelector("select");
-      if (seen.has(slot)) continue;
-      seen.add(slot);
-      if (sel && sel.value) fils[slot - 1] = { name: sel.value, locked: true };
+      if (sel && sel.value && !fils[slot - 1].locked) fils[slot - 1] = { name: sel.value, locked: true };
     }
     request.filaments = fils;
   }
@@ -406,9 +407,17 @@ async function onConvert() {
   }
 }
 
+let downloadUrls = [];
+function revokeDownloads() {
+  for (const u of downloadUrls) URL.revokeObjectURL(u);
+  downloadUrls = [];
+}
+
 function renderResult(r) {
+  revokeDownloads();
   const links = r.files.map((f) => {
     const url = URL.createObjectURL(new Blob([f.bytes], { type: "application/vnd.ms-package.3dmanufacturing-3dmodel+xml" }));
+    downloadUrls.push(url);
     return el("a", { href: url, download: f.name, text: `Download ${f.name}` });
   });
   const facts = [
@@ -451,18 +460,34 @@ function wire() {
     drop.classList.remove("over");
     if (e.dataTransfer.files.length) onFile(e.dataTransfer.files[0]);
   });
-  for (const r of document.querySelectorAll("input[name=slicer]")) r.addEventListener("change", () => onSlicerChange().catch(showError));
+  for (const r of document.querySelectorAll("input[name=slicer]")) r.addEventListener("change", () => loading(onSlicerChange()));
   for (const r of document.querySelectorAll("input[name=settings]")) r.addEventListener("change", () => {
     savePrefs({ settings: settingsMode() });
     renderFilaments();
   });
-  $("vendor").addEventListener("change", () => onVendorChange().catch(showError));
+  $("vendor").addEventListener("change", () => loading(onVendorChange()));
   $("printer").addEventListener("change", onPrinterChange);
   $("process").addEventListener("change", updateButton);
   $("printer-file").addEventListener("change", onPrinterFile);
   $("beds").addEventListener("change", onBedsChange);
-  $("keep-numbers").addEventListener("change", renderFilaments);
+  $("keep-numbers").addEventListener("change", () => {
+    if (!$("keep-numbers").checked) {  // back to the suggested slots, keeping the preset picks
+      for (const tr of $("fil-rows").querySelectorAll("tr")) {
+        tr.querySelector("input").value = String(state.project.suggested_map[tr.dataset.ext] || tr.dataset.ext);
+      }
+    }
+    renderFilaments();
+  });
   $("convert").addEventListener("click", onConvert);
+}
+
+// Keep Convert disabled while a slicer / vendor preset list loads, so a conversion never pairs
+// one vendor's table with another's printer.
+let loads = 0;
+function loading(promise) {
+  loads++;
+  updateButton();
+  return promise.catch(showError).finally(() => { loads--; updateButton(); });
 }
 
 function showError(e) {
@@ -487,12 +512,11 @@ async function start() {
     const firstOk = document.querySelector("input[name=slicer]:not(:disabled)");
     if (firstOk) firstOk.checked = true;
   }
-  if (prefs.settings) {
-    const r = document.querySelector(`input[name=settings][value="${prefs.settings}"]`);
-    if (r) r.checked = true;
+  for (const r of document.querySelectorAll("input[name=settings]")) {
+    if (r.value === prefs.settings) r.checked = true;
   }
   if (state.build.version) $("app-version").textContent = "v" + state.build.version;
-  const presets = onSlicerChange().catch((e) => showError("Could not load the preset list: " + e.message));
+  const presets = loading(onSlicerChange());
   try {
     await call("init");
     pythonReady = true;

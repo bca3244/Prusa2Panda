@@ -329,13 +329,17 @@ def resolve_target(
         process_name = str(pcfg.get("default_print_profile") or "")
     tgt.process = make_anchor(install, "process", process_name, w)
     default_fil = _first(pcfg.get("default_filament_profile"))
-    if len(locked) != len(filaments) or not all(filaments):
+    if len(locked) != len(filaments):
         locked = []
+    if locked:  # positional: an empty pick takes the default in place, so the locks stay aligned
+        filaments = [f or default_fil for f in filaments]
     filaments = [f for f in filaments if f] or ([default_fil] if default_fil else [])
     for i in range(max(1, n_filaments)):
         cur = filaments[i] if i < len(filaments) else (filaments[-1] if filaments else "")
         ptype = prusa_types[i] if i < len(prusa_types) else ""
-        if i < len(locked) and locked[i]:
+        # Slots past the selection (colour changes add some) copy the last filament, lock included.
+        lock = locked[min(i, len(locked) - 1)] if locked else False
+        if lock:
             name = cur
         else:
             name = pick_filament(install, cur, printer_name, ptype, default_fil) if install else cur

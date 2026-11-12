@@ -168,3 +168,32 @@ def test_inspect(project):
     assert [u["extruder"] for u in info["used"]] == [1, 2]
     assert info["used"][1]["generic_type"] == "PETG"
     assert info["suggested_map"] == {"1": 1, "2": 2}
+
+
+def test_colour_change_slots_keep_the_locked_pick(table_dir, tmp_path):
+    gc = ('<?xml version="1.0" encoding="utf-8"?><custom_gcodes_per_print_z bed_idx="0">'
+          '<code print_z="5" type="0" extruder="1" color="#0000FF" extra="" gcode="M600"/>'
+          '<mode value="SingleExtruder"/></custom_gcodes_per_print_z>')
+    src = str(build_3mf(tmp_path / "cc.3mf", [Obj("a", parts=[Part("p")])], custom_gcodes=gc))
+    fils = [{"name": "Bambu PETG HF @BBL X1C", "locked": True}]
+    web.convert(_request(src, table_dir, tmp_path / "out.3mf", filaments=fils, filament_map={"1": 1}))
+    assert _cfg(tmp_path / "out.3mf")["filament_settings_id"] == ["Bambu PETG HF @BBL X1C"] * 2
+
+
+def test_empty_pick_keeps_other_locks_aligned(project, table_dir, tmp_path):
+    fils = [{"name": "", "locked": False}, {"name": "Bambu PETG HF @BBL X1C", "locked": True}]
+    web.convert(_request(project, table_dir, tmp_path / "out.3mf", filaments=fils))
+    assert _cfg(tmp_path / "out.3mf")["filament_settings_id"] == ["Bambu PLA Basic @BBL X1C", "Bambu PETG HF @BBL X1C"]
+
+
+def test_unmapped_support_extruder_gets_its_own_slot(table_dir, tmp_path):
+    # Parts on extruders 1 and 3, supports on 2: the page maps only 1 and 3 (to slots 1, 2).
+    src = str(build_3mf(tmp_path / "s.3mf", [Obj("a", parts=[Part("x", extruder=1),
+                                                            Part("y", extruder=3, offset=(12, 0, 0))])],
+                        config={"support_material": "1", "support_material_extruder": "2",
+                                "extruder_colour": '"#FF0000";"#00FF00";"#0000FF"',
+                                "filament_type": "PLA;PETG;PLA", "nozzle_diameter": "0.4,0.4,0.4"}))
+    r = json.loads(web.convert(_request(src, table_dir, tmp_path / "out.3mf", settings="prusa",
+                                        filament_map={"1": 1, "3": 2})))
+    assert r["filament_map"] == {"2": 3, "3": 2}
+    assert _cfg(tmp_path / "out.3mf")["filament_colour"] == ["#FF0000", "#0000FF", "#00FF00"]
