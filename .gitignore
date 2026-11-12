@@ -6,3 +6,9 @@ dist/
 samples/
 *.spec
 .pytest_cache/
+_site/
+node_modules/
+web-smoke/
+profiles-bambu/
+profiles-orca/
+smoke.3mf

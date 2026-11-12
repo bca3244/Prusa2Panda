@@ -1,0 +1,105 @@
+# Builds the web version (GitHub Pages) and checks it with real conversions in headless Chromium.
+#
+# The page references Bambu Studio / OrcaSlicer system presets by name, so its preset tables
+# are regenerated from the latest release of each slicer on every build. The weekly run picks
+# up new slicer releases. Pull requests build and test the site without deploying it.
+#
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+name: Web
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 6 * * 1"  # Mondays: new slicer releases
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: python -m pytest -q tests
+
+      - name: Find the latest Bambu Studio and OrcaSlicer releases
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "bambu=$(gh release view -R bambulab/BambuStudio --json tagName -q .tagName)" >> "$GITHUB_OUTPUT"
+          echo "orca=$(gh release view -R OrcaSlicer/OrcaSlicer --json tagName -q .tagName)" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch their bundled profiles
+        run: |
+          fetch() {  # repo tag dir paths...
+            local repo=$1 tag=$2 dir=$3; shift 3
+            git clone -q --depth 1 --filter=blob:none --sparse --branch "$tag" "https://github.com/$repo" "$dir"
+            git -C "$dir" sparse-checkout set --no-cone "$@"
+          }
+          fetch bambulab/BambuStudio "${{ steps.rel.outputs.bambu }}" profiles-bambu \
+            '/resources/profiles/BBL/' '/resources/profiles/BBL.json'
+          fetch OrcaSlicer/OrcaSlicer "${{ steps.rel.outputs.orca }}" profiles-orca '/resources/profiles/'
+
+      - name: Build the site
+        run: |
+          python tools/build_web.py --out _site \
+            --bambu-profiles profiles-bambu/resources/profiles --bambu-version "${{ steps.rel.outputs.bambu }}" \
+            --orca-profiles profiles-orca/resources/profiles --orca-version "${{ steps.rel.outputs.orca }}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: Smoke test (real conversions in the browser)
+        run: |
+          python tools/make_smoke_3mf.py smoke.3mf
+          node tools/smoke_web.js _site smoke.3mf web-smoke
+          python tools/check_web_outputs.py web-smoke
+
+      - name: Keep the smoke test outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke
+          path: web-smoke
+          if-no-files-found: ignore
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

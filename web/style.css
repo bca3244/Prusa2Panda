@@ -174,3 +174,7 @@ button.primary:not(:disabled):hover { filter: brightness(1.05); }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
 .foot { color: var(--muted); font-size: 0.85rem; padding-bottom: 28px; }
+
+[hidden] { display: none !important; }
+.seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }

@@ -5,11 +5,11 @@ so the work can resume after an interruption. Delete this file once the web vers
 
 ## Plan
 
-- [ ] Core: `convert_file(install=...)` and a table-backed install (`prusa2panda/preset_table.py`)
-- [ ] `tools/gen_preset_table.py`: preset table from BambuStudio / OrcaSlicer `resources/profiles`
-- [ ] `web/`: static page, runs the core in Pyodide (+lxml), downloads the result
-- [ ] `tools/build_web.py`: assembles `_site/` (page, package zip, preset tables)
-- [ ] `.github/workflows/pages.yml`: build, headless-browser smoke conversion, deploy to Pages
+- [x] Core: `convert_file(install=...)` and a table-backed install (`prusa2panda/preset_table.py`)
+- [x] `tools/gen_preset_table.py`: preset table from BambuStudio / OrcaSlicer `resources/profiles`
+- [x] `web/`: static page, runs the core in Pyodide (+lxml), downloads the result
+- [x] `tools/build_web.py`: assembles `_site/` (page, package zip, preset tables)
+- [x] `.github/workflows/pages.yml`: build, headless-browser smoke conversion, deploy to Pages
 - [ ] Tests, README section, CHANGELOG
 - [ ] Fable review, PR, CI green, merge
 
@@ -22,3 +22,7 @@ so the work can resume after an interruption. Delete this file once the web vers
   open in older slicer builds too.
 
 ## Log
+- 2026-11-12: core + tables + page + smoke test done. Local check: Eagle Clicker V21 converted in
+  headless Chromium (4 modes); the Bambu output is byte-identical to the native-Python conversion.
+  Local runs need `--cdn-dir` (jsDelivr is blocked in the cloud sandbox) with a stand-in lxml.
+- Next: first CI run of pages.yml, README/CHANGELOG, Fable review, PR, ask Brian to enable Pages.
