@@ -173,6 +173,10 @@ architecture) it runs on.
 
 ## Releases
 
+Before publishing, bump the version in `pyproject.toml` and `prusa2panda/__init__.py` and give
+it a `## X.Y.Z` section in `CHANGELOG.md` (`python tools/check_version.py vX.Y.Z` checks all
+three); the workflow refuses to build a release whose tag does not match.
+
 Publishing a GitHub release (Releases → *Draft a new release* → new tag such as `v0.2.0` →
 *Publish release*) runs `.github/workflows/release.yml`. On Windows, macOS (Apple silicon and
 Intel) and Linux it runs the tests, builds the GUI and the command line tool, converts a small
