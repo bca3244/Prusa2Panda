@@ -1,10 +1,17 @@
-# Builds the Windows exes and attaches them to a GitHub release.
+# Builds Prusa2Panda for Windows, macOS and Linux and attaches the builds to a GitHub release.
 #
-# Publish a release on GitHub (Releases -> Draft a new release -> new tag such as v0.1.0 ->
-# Publish) and this workflow tests the code, builds Prusa2Panda.exe (GUI) and
-# prusa2panda-cli.exe (command line) with PyInstaller, and uploads both to that release.
-# "Run workflow" on the Actions tab, and every pull request, build and smoke-test them without
-# a release (download them from the run).
+# Publish a release on GitHub (Releases -> Draft a new release -> new tag such as v0.2.0 ->
+# Publish) and this workflow tests the code on every platform, builds the GUI and the command
+# line tool with PyInstaller, runs real conversions with the built binaries, and uploads them
+# to that release. "Run workflow" on the Actions tab, and every pull request, build and
+# smoke-test them without a release (download them from the run).
+#
+# What each platform gets:
+#   Windows       Prusa2Panda.exe (GUI), prusa2panda-cli.exe
+#   macOS arm64   Prusa2Panda-macos-arm64.dmg (Prusa2Panda.app), prusa2panda-cli-macos-arm64.tar.gz
+#   macOS x86_64  Prusa2Panda-macos-x86_64.dmg, prusa2panda-cli-macos-x86_64.tar.gz
+#   Linux x86_64  Prusa2Panda-linux-x86_64.tar.gz (Prusa2Panda GUI + prusa2panda-cli), built on
+#                 Ubuntu 22.04 so it runs on any distro with glibc 2.35 or newer
 name: Release
 
 on:
@@ -17,14 +24,38 @@ permissions:
   contents: write
 
 jobs:
-  windows-exe:
-    runs-on: windows-latest
+  build:
+    name: build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            runner: windows-latest
+            arch: x86_64
+          - platform: macos-arm64
+            runner: macos-15
+            arch: arm64
+          - platform: macos-x86_64
+            runner: macos-15-intel
+            arch: x86_64
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Linux packages (Tk for the GUI, Xvfb for its smoke test)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtk8.6 xvfb
 
       - name: Install dependencies
         run: |
@@ -34,34 +65,83 @@ jobs:
       - name: Run tests
         run: python -m pytest -q tests
 
-      - name: Build exes
+      # --collect-submodules bundles every prusa2panda module (the settings schemas included),
+      # even ones that are only imported lazily.
+      - name: Build
         run: |
-          pyinstaller --onefile --windowed --name Prusa2Panda --collect-submodules prusa2panda gui_launcher.py
-          pyinstaller --onefile --console --name prusa2panda-cli --collect-submodules prusa2panda cli_launcher.py
+          common=(--noconfirm --collect-submodules prusa2panda)
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # A windowed macOS build is an .app bundle (onedir; PyInstaller no longer supports
+            # onefile .apps).
+            pyinstaller "${common[@]}" --windowed --name Prusa2Panda \
+              --osx-bundle-identifier io.github.bca3244.prusa2panda gui_launcher.py
+          else
+            pyinstaller "${common[@]}" --onefile --windowed --name Prusa2Panda gui_launcher.py
+          fi
+          pyinstaller "${common[@]}" --onefile --console --name prusa2panda-cli cli_launcher.py
 
-      # Real conversions with the frozen exe: a module PyInstaller left out only fails here.
-      - name: Smoke test the command line exe
+      - name: Check the macOS architecture
+        if: runner.os == 'macOS'
         run: |
+          file dist/prusa2panda-cli dist/Prusa2Panda.app/Contents/MacOS/Prusa2Panda
+          for bin in dist/prusa2panda-cli dist/Prusa2Panda.app/Contents/MacOS/Prusa2Panda; do
+            archs=$(lipo -archs "$bin")
+            [ "$archs" = "${{ matrix.arch }}" ] || { echo "$bin is $archs, expected ${{ matrix.arch }}"; exit 1; }
+          done
+
+      # Real conversions with the frozen binary: a module PyInstaller left out only fails here.
+      - name: Smoke test the command line binary
+        run: |
+          set -e
+          if [ "$RUNNER_OS" = "Windows" ]; then cli=dist/prusa2panda-cli.exe; else cli=dist/prusa2panda-cli; fi
           python tools/make_smoke_3mf.py smoke.3mf
-          dist\prusa2panda-cli.exe --info smoke.3mf
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          foreach ($slicer in "bambu", "orca") {
-            dist\prusa2panda-cli.exe --slicer $slicer --printer prusa --prusa-settings smoke.3mf "smoke_$slicer.3mf"
-            if ($LASTEXITCODE -ne 0) { exit 1 }
-            dist\prusa2panda-cli.exe --slicer $slicer --no-settings --keep-extruders smoke.3mf "smoke_${slicer}_geometry.3mf"
-            if ($LASTEXITCODE -ne 0) { exit 1 }
-            if (-not (Test-Path "smoke_$slicer.3mf")) { exit 1 }
-          }
+          "$cli" --info smoke.3mf
+          for slicer in bambu orca; do
+            "$cli" --slicer $slicer --printer prusa --prusa-settings smoke.3mf "smoke_$slicer.3mf"
+            "$cli" --slicer $slicer --no-settings --keep-extruders smoke.3mf "smoke_${slicer}_geometry.3mf"
+            for out in "smoke_$slicer.3mf" "smoke_${slicer}_geometry.3mf"; do
+              python -c "import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; assert '3D/3dmodel.model' in z.namelist(), z.namelist()" "$out"
+            done
+            python -c "import sys, zipfile; assert 'Metadata/project_settings.config' in zipfile.ZipFile(sys.argv[1]).namelist()" "smoke_$slicer.3mf"
+          done
+
+      - name: Smoke test the GUI binary (it must start and stay up)
+        run: |
+          case "$RUNNER_OS" in
+            Windows) python tools/smoke_gui.py dist/Prusa2Panda.exe ;;
+            macOS)   python tools/smoke_gui.py dist/Prusa2Panda.app/Contents/MacOS/Prusa2Panda ;;
+            Linux)   xvfb-run -a python tools/smoke_gui.py dist/Prusa2Panda ;;
+          esac
+
+      - name: Package
+        run: |
+          set -e
+          mkdir -p release
+          case "$RUNNER_OS" in
+            Windows)
+              cp dist/Prusa2Panda.exe dist/prusa2panda-cli.exe release/
+              ;;
+            macOS)
+              mkdir dmg
+              cp -R dist/Prusa2Panda.app dmg/
+              ln -s /Applications dmg/Applications
+              hdiutil create -volname Prusa2Panda -srcfolder dmg -ov -format UDZO \
+                "release/Prusa2Panda-${{ matrix.platform }}.dmg"
+              tar -czf "release/prusa2panda-cli-${{ matrix.platform }}.tar.gz" -C dist prusa2panda-cli
+              ;;
+            Linux)
+              tar -czf "release/Prusa2Panda-${{ matrix.platform }}.tar.gz" -C dist Prusa2Panda prusa2panda-cli
+              ;;
+          esac
+          ls -l release
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Prusa2Panda-windows
-          path: |
-            dist/Prusa2Panda.exe
-            dist/prusa2panda-cli.exe
+          name: Prusa2Panda-${{ matrix.platform }}
+          path: release/*
 
       - name: Attach to the release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/Prusa2Panda.exe dist/prusa2panda-cli.exe --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" release/* --clobber

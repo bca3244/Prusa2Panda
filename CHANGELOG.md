@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Release builds for macOS (an `.app` in a `.dmg`, for Apple silicon and Intel) and Linux
+  (x86_64, built on Ubuntu 22.04), next to the Windows exes. The macOS app is not signed: see
+  *Download* in the README for how to open it the first time.
+- Every build runs real conversions with the built command line tool and checks that the GUI
+  starts.
+
 ## 0.1.2
 
 - PrusaSlicer colour changes (M600) now change colour in Bambu Studio / OrcaSlicer. Those
