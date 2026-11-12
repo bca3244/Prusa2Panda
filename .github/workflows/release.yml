@@ -24,8 +24,19 @@ permissions:
   contents: write
 
 jobs:
+  # On a release, the tag must match the version in pyproject.toml and prusa2panda/__init__.py,
+  # and CHANGELOG.md must have a section for it; otherwise nothing is built or attached. Bump
+  # them in a PR before publishing the release.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the version numbers
+        run: python3 tools/check_version.py ${{ github.event.release.tag_name }}
+
   build:
     name: build (${{ matrix.platform }})
+    needs: version
     strategy:
       fail-fast: false
       matrix:

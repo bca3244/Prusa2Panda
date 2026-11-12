@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Release builds for macOS (an `.app` in a `.dmg`, for Apple silicon and Intel) and Linux
   (x86_64, built on Ubuntu 22.04), next to the Windows exes. The macOS app is not signed: see
   *Download* in the README for how to open it the first time.
 - Every build runs real conversions with the built command line tool and checks that the GUI
   starts.
+- A release whose tag does not match the version in `pyproject.toml` / `prusa2panda/__init__.py`
+  (or has no CHANGELOG section) fails before anything is built.
 
 ## 0.1.2
 
